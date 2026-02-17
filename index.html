@@ -133,11 +133,51 @@
   #back-btn {
     position:fixed; top:44px; left:12px; z-index:80; display:none;
     background:rgba(0,4,12,0.95); border:1px solid rgba(0,255,255,0.5);
-    color:#0ff; font-family:'Courier New',monospace; font-size:10px; letter-spacing:2px;
-    padding:5px 14px; cursor:pointer; transition:all 0.2s;
+    color:#0ff; font-family:'Courier New',monospace; font-size:clamp(10px,2vw,12px); letter-spacing:2px;
+    padding:clamp(5px,1.5vw,8px) clamp(12px,2.5vw,18px); cursor:pointer; transition:all 0.2s;
   }
   #back-btn:hover { box-shadow:0 0 10px rgba(0,255,255,0.4); border-color:#0ff; }
   #back-btn.visible { display:block; }
+
+  @media (max-width: 600px) {
+    #toolbar {
+      height: 48px;
+      padding: 0 10px;
+      gap: 8px;
+    }
+    #toolbar-title { display: none; }
+    #searchbar input {
+      font-size: 14px;
+      height: 34px;
+      padding: 6px 12px;
+    }
+    #searchbar .clear-btn {
+      height: 34px;
+      font-size: 16px;
+      padding: 0 12px;
+    }
+    #search-count { font-size: 11px; min-width: 50px; }
+    #filter-btn {
+      font-size: 12px;
+      height: 34px;
+      padding: 0 14px;
+      letter-spacing: 1px;
+    }
+    #filter-count { font-size: 10px; }
+    #back-btn {
+      top: 56px;
+      font-size: 13px;
+      padding: 8px 18px;
+      letter-spacing: 1px;
+    }
+    #hud {
+      height: 36px;
+      font-size: 11px;
+      gap: 12px;
+      padding: 0 10px;
+    }
+    #hud .dot { width: 10px; height: 10px; }
+  }
 
   /* Bottom HUD bar */
   #hud {
@@ -248,8 +288,10 @@ const GROUPS = [
 const HUD_H = 28;
 function TOOLBAR_H(){ return document.getElementById('toolbar').offsetHeight || 36; }
 
-// Responsive canvas font scale: 1.0 on desktop, up to 2.5x on mobile
+// Responsive canvas font scale: 1.0 on desktop, scales up on mobile
 function fScale() { return Math.max(1, Math.min(2.5, 900 / window.innerWidth)); }
+// Is mobile (narrow screen)?
+function isMobile() { return window.innerWidth < 600; }
 
 const canvas = document.getElementById('c');
 const ctx    = canvas.getContext('2d');
@@ -267,6 +309,9 @@ let zoomedCat   = null;
 // Quadrant label fade tracking
 let quadHover = {}; // name -> { enteredAt: ms, exitedAt: ms }
 GROUPS.forEach(g => { quadHover[g.name] = { enteredAt:0, exitedAt:0 }; });
+
+// Category label zoom tracking
+let catHover = {}; // catName -> { enteredAt: ms, exitedAt: ms }
 
 // ── Treemap ──────────────────────────────────────────────────────────────────
 function treemap(rect, items, weightFn) {
@@ -433,17 +478,72 @@ function drawFull(W, H, now) {
       if (!activeCategories.has(cat.name)) return;
       const cb=cat.bounds, ci=cat.inner;
       const cc=CAT_COLORS[cat.name]||'#888';
+      const S=fScale();
+      const mobile=isMobile();
 
       ctx.fillStyle=hexToRgba(cc,0.05); ctx.fillRect(cb.x,cb.y,cb.w,cb.h);
       glow(cc,6); ctx.strokeStyle=hexToRgba(cc,0.5); ctx.lineWidth=1;
       ctx.strokeRect(cb.x+0.5,cb.y+0.5,cb.w-1,cb.h-1); noGlow();
 
-      if(cb.h>22&&cb.w>60){
-        const fs=Math.min(9,Math.max(7,cb.w/14));
-        const maxC=Math.floor(cb.w/(fs*0.62));
-        const lbl=cat.name.length>maxC?cat.name.slice(0,maxC-1)+'…':cat.name;
-        drawLabel(lbl,cb.x+cb.w/2,cb.y+9,hexToRgba(cc,0.8),fs,'center',3);
-        if(cb.h>28) drawLabel(`[${cat.nodes.length}]`,cb.x+cb.w/2,cb.y+19,hexToRgba(cc,0.4),7,'center',0);
+      if(cb.h>22&&cb.w>30){
+        // Base font size: larger on mobile
+        const baseFsRaw = mobile
+          ? Math.min(14, Math.max(10, cb.w/10))
+          : Math.min(9,  Math.max(7,  cb.w/14));
+
+        // Hover animation: scale up then back down
+        const ch = catHover[cat.name] || {enteredAt:0,exitedAt:0};
+        const CAT_GROW=250, CAT_HOLD=800, CAT_SHRINK=400;
+        let animScale=1;
+        if(ch.enteredAt>0){
+          const elapsed=now-ch.enteredAt;
+          if(ch.exitedAt>=ch.enteredAt){
+            // shrinking back
+            const sinceExit=now-ch.exitedAt;
+            const peak=Math.min(1, elapsed/CAT_GROW);
+            const shrinkT=Math.min(1, sinceExit/CAT_SHRINK);
+            // ease out cubic
+            const ease=1-Math.pow(1-shrinkT,3);
+            animScale=1+(peak)*(1-ease)*0.8; // max 1.8x
+          } else {
+            // growing
+            const t=Math.min(1, elapsed/CAT_GROW);
+            const ease=1-Math.pow(1-t,3);
+            animScale=1+ease*0.8; // up to 1.8x
+          }
+        }
+
+        const fsRaw = baseFsRaw * animScale;
+        // For the animated label, draw at tile center when large, top when small
+        const animT = animScale-1; // 0..0.8
+        const labelY = cb.y + 9 + animT*(cb.h/2-9); // slides toward center
+        const labelAlpha = 0.8 + animT*0.2;
+        const glowStr = 3 + animT*10;
+
+        // Full name when hovered (no truncation), truncate when small
+        let lbl;
+        if(animScale>1.1){
+          lbl=cat.name; // show full name when zoomed
+        } else {
+          const maxC=Math.floor(cb.w/(fsRaw*0.62));
+          lbl=cat.name.length>maxC?cat.name.slice(0,maxC-1)+'…':cat.name;
+        }
+
+        ctx.save();
+        ctx.font=`${fsRaw*S}px 'Courier New',monospace`;
+        ctx.textAlign='center'; ctx.textBaseline='middle';
+        ctx.fillStyle=hexToRgba(cc,labelAlpha);
+        glow(cc,glowStr*S);
+        ctx.fillText(lbl, cb.x+cb.w/2, labelY);
+        noGlow();
+
+        // Count — only when not much enlarged
+        if(cb.h>28 && animScale<1.2){
+          ctx.font=`${7*S}px 'Courier New',monospace`;
+          ctx.fillStyle=hexToRgba(cc,0.4);
+          ctx.fillText(`[${cat.nodes.length}]`, cb.x+cb.w/2, cb.y+19);
+        }
+        ctx.restore();
       }
 
       if(!ci) return;
@@ -615,7 +715,7 @@ function onMove(e) {
     return; // draw happens in RAF
   }
 
-  // Quadrant hover tracking (world coords)
+  // Quadrant + category hover tracking (world coords)
   if (!zoomedCat) {
     const w=worldPt(mx,my);
     GROUPS.forEach(g=>{
@@ -627,6 +727,16 @@ function onMove(e) {
       if(inside&&!wasInside) qh.enteredAt=Date.now();
       else if(!inside&&wasInside) qh.exitedAt=Date.now();
     });
+
+    // Category hover
+    for(const [catName, b] of Object.entries(catBounds)){
+      if(!catHover[catName]) catHover[catName]={enteredAt:0,exitedAt:0};
+      const ch=catHover[catName];
+      const inside=w.x>=b.x&&w.x<=b.x+b.w&&w.y>=b.y&&w.y<=b.y+b.h;
+      const wasInside=ch.enteredAt>ch.exitedAt;
+      if(inside&&!wasInside) ch.enteredAt=Date.now();
+      else if(!inside&&wasInside) ch.exitedAt=Date.now();
+    }
   }
 
   // Tooltip / hover
