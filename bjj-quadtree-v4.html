@@ -1,0 +1,804 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>BJJ Concept Map — Quadtree</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:#000; overflow:hidden; font-family:'Courier New',monospace; }
+  canvas { display:block; cursor:crosshair; position:fixed; top:36px; left:0; }
+
+  /* Tooltip */
+  #tooltip {
+    position:fixed; pointer-events:none;
+    background:rgba(0,3,8,0.97); border:1px solid #0ff;
+    box-shadow:0 0 14px #0ff, inset 0 0 8px rgba(0,255,255,0.04);
+    color:#0ff; padding:clamp(10px,2vw,16px); border-radius:2px;
+    font-size:clamp(12px,1.8vw,14px); line-height:1.6; display:none; z-index:100;
+    width:min(360px, 90vw); max-height:min(50vh, 320px);
+    overflow:hidden; pointer-events:none;
+  }
+  #tooltip .title { color:#fff; font-size:clamp(14px,2.2vw,17px); font-weight:bold; margin-bottom:4px; letter-spacing:1px; }
+  #tooltip .cat   { font-size:clamp(10px,1.5vw,12px); margin-bottom:6px; letter-spacing:2px; text-transform:uppercase; }
+  #tooltip .desc  { color:#7ff; font-size:clamp(11px,1.6vw,13px); white-space:pre-wrap; word-break:break-word; }
+  #tooltip .expand-hint { color:rgba(0,255,255,0.35); font-size:10px; margin-top:6px; letter-spacing:1px; text-align:right; }
+
+  /* Full card modal */
+  #card-modal {
+    position:fixed; inset:0; z-index:300; background:rgba(0,0,0,0.88);
+    display:none; align-items:center; justify-content:center; padding:clamp(8px,3vw,24px);
+  }
+  #card-modal.open { display:flex; }
+  #card-inner {
+    background:#000d18; border:1px solid #0ff;
+    box-shadow:0 0 30px #0ff, inset 0 0 20px rgba(0,0,0,0.5);
+    width:min(680px, 98vw);
+    height:min(90vh, 800px);
+    max-height:90vh;
+    display:flex; flex-direction:column; border-radius:2px;
+    font-family:'Courier New',monospace;
+    overflow:hidden;
+  }
+  #card-header {
+    padding:clamp(14px,3vw,22px) clamp(16px,3vw,26px);
+    border-bottom:1px solid rgba(0,255,255,0.15);
+    display:flex; justify-content:space-between; align-items:flex-start; gap:12px;
+    flex-shrink:0;
+  }
+  #card-title { color:#fff; font-size:clamp(16px,3vw,22px); font-weight:bold; letter-spacing:1px; line-height:1.3; }
+  #card-cat   { font-size:clamp(10px,1.6vw,12px); letter-spacing:2px; margin-top:6px; text-transform:uppercase; }
+  #card-close {
+    color:rgba(0,255,255,0.4); cursor:pointer; font-size:clamp(20px,4vw,28px);
+    line-height:1; flex-shrink:0; transition:color 0.2s; pointer-events:all;
+    padding:0 0 0 8px;
+  }
+  #card-close:hover { color:#0ff; }
+  #card-body {
+    padding:clamp(14px,3vw,22px) clamp(16px,3vw,26px);
+    overflow-y:auto;
+    color:#7ff; font-size:clamp(13px,2vw,15px);
+    line-height:1.85; white-space:pre-wrap; word-break:break-word;
+    flex:1;
+    -webkit-overflow-scrolling:touch;
+  }
+  #card-body::-webkit-scrollbar { width:5px; }
+  #card-body::-webkit-scrollbar-track { background:rgba(0,255,255,0.04); }
+  #card-body::-webkit-scrollbar-thumb { background:rgba(0,255,255,0.25); border-radius:2px; }
+  #card-body::-webkit-scrollbar-thumb:hover { background:rgba(0,255,255,0.5); }
+
+  /* Toolbar */
+  #toolbar {
+    position:fixed; top:0; left:0; right:0; height:clamp(36px,6vw,44px);
+    background:rgba(0,4,12,0.97); border-bottom:1px solid rgba(0,255,255,0.2);
+    display:flex; align-items:center; gap:10px; z-index:60; padding:0 12px;
+  }
+  #toolbar-title { color:rgba(0,255,255,0.3); font-size:clamp(8px,1.5vw,10px); letter-spacing:3px; white-space:nowrap; padding-right:12px; border-right:1px solid rgba(0,255,255,0.15); }
+  #searchbar { flex:1; display:flex; align-items:center; gap:0; max-width:460px; }
+  #searchbar input {
+    width:100%; background:transparent; border:1px solid rgba(0,255,255,0.25); border-right:none;
+    color:#0ff; font-family:'Courier New',monospace; font-size:clamp(11px,2vw,13px); letter-spacing:1px;
+    padding:4px 12px; outline:none; height:clamp(24px,4vw,30px); transition:border-color 0.2s, box-shadow 0.2s;
+  }
+  #searchbar input:focus { border-color:#0ff; box-shadow:0 0 10px rgba(0,255,255,0.2); }
+  #searchbar input::placeholder { color:rgba(0,255,255,0.25); }
+  #searchbar .clear-btn {
+    background:transparent; border:1px solid rgba(0,255,255,0.25);
+    color:rgba(0,255,255,0.35); cursor:pointer; font-size:clamp(11px,2vw,14px);
+    padding:0 9px; height:clamp(24px,4vw,30px); display:flex; align-items:center; transition:all 0.2s;
+  }
+  #searchbar .clear-btn:hover { color:#0ff; }
+  #search-count { color:rgba(0,255,255,0.45); font-size:clamp(8px,1.4vw,10px); letter-spacing:2px; white-space:nowrap; pointer-events:none; min-width:60px; }
+  #toolbar-spacer { flex:1; }
+  #filter-btn {
+    background:transparent; border:1px solid rgba(255,0,200,0.4); color:#f0f;
+    font-family:'Courier New',monospace; font-size:clamp(9px,1.6vw,11px); letter-spacing:2px;
+    padding:3px clamp(8px,2vw,14px); cursor:pointer; height:clamp(24px,4vw,30px); transition:all 0.2s; white-space:nowrap;
+  }
+  #filter-btn:hover { box-shadow:0 0 10px rgba(255,0,200,0.4); border-color:#f0f; }
+  #filter-count { display:inline-block; margin-left:6px; background:#f0f; color:#000; border-radius:10px; font-size:8px; padding:1px 5px; font-weight:bold; }
+
+  /* Filter modal */
+  #filter-modal { position:fixed; inset:0; z-index:200; background:rgba(0,0,0,0.7); display:none; align-items:center; justify-content:center; }
+  #filter-modal.open { display:flex; }
+  #filter-panel {
+    background:#000d18; border:1px solid rgba(255,0,200,0.5);
+    box-shadow:0 0 40px rgba(255,0,200,0.2); width:680px; max-height:80vh;
+    display:flex; flex-direction:column; border-radius:2px;
+  }
+  #filter-header { display:flex; align-items:center; justify-content:space-between; padding:16px 20px; border-bottom:1px solid rgba(255,0,200,0.2); }
+  #filter-header h2 { color:#f0f; font-size:clamp(11px,2vw,13px); letter-spacing:3px; font-weight:normal; }
+  #filter-header .close-btn { color:rgba(255,0,200,0.5); cursor:pointer; font-size:clamp(16px,3vw,20px); transition:color 0.2s; }
+  #filter-header .close-btn:hover { color:#f0f; }
+  #filter-actions { padding:10px 20px; border-bottom:1px solid rgba(255,0,200,0.1); display:flex; gap:10px; }
+  #filter-actions button {
+    background:transparent; border:1px solid rgba(255,0,200,0.3); color:rgba(255,0,200,0.7);
+    font-family:'Courier New',monospace; font-size:clamp(9px,1.6vw,11px); letter-spacing:1px; padding:5px 12px; cursor:pointer; transition:all 0.2s;
+  }
+  #filter-actions button:hover { border-color:#f0f; color:#f0f; box-shadow:0 0 8px rgba(255,0,200,0.3); }
+  #filter-body { overflow-y:auto; padding:16px 20px; flex:1; }
+  #filter-body::-webkit-scrollbar { width:4px; }
+  #filter-body::-webkit-scrollbar-thumb { background:rgba(255,0,200,0.3); }
+  .filter-group { margin-bottom:20px; }
+  .filter-group-title { font-size:clamp(9px,1.6vw,11px); letter-spacing:3px; margin-bottom:10px; padding-bottom:6px; border-bottom:1px solid rgba(255,255,255,0.05); }
+  .filter-chips { display:flex; flex-wrap:wrap; gap:6px; }
+  .chip { display:flex; align-items:center; gap:6px; border:1px solid; border-radius:2px; padding:clamp(5px,1.2vw,7px) clamp(8px,1.5vw,11px); cursor:pointer; font-size:clamp(9px,1.6vw,11px); letter-spacing:1px; font-family:'Courier New',monospace; transition:all 0.15s; user-select:none; opacity:0.4; }
+  .chip.active { opacity:1; }
+  .chip .chip-dot { width:7px; height:7px; border-radius:50%; flex-shrink:0; }
+  #filter-footer { padding:12px 20px; border-top:1px solid rgba(255,0,200,0.2); display:flex; justify-content:space-between; align-items:center; }
+  #filter-footer .count { color:rgba(0,255,255,0.5); font-size:clamp(9px,1.5vw,11px); letter-spacing:1px; }
+  #apply-btn { background:rgba(255,0,200,0.1); border:1px solid #f0f; box-shadow:0 0 10px rgba(255,0,200,0.3); color:#f0f; font-family:'Courier New',monospace; font-size:clamp(10px,1.8vw,12px); letter-spacing:2px; padding:8px 20px; cursor:pointer; transition:all 0.2s; }
+  #apply-btn:hover { background:rgba(255,0,200,0.2); box-shadow:0 0 20px rgba(255,0,200,0.5); }
+
+  /* Zoom back button */
+  #back-btn {
+    position:fixed; top:44px; left:12px; z-index:80; display:none;
+    background:rgba(0,4,12,0.95); border:1px solid rgba(0,255,255,0.5);
+    color:#0ff; font-family:'Courier New',monospace; font-size:10px; letter-spacing:2px;
+    padding:5px 14px; cursor:pointer; transition:all 0.2s;
+  }
+  #back-btn:hover { box-shadow:0 0 10px rgba(0,255,255,0.4); border-color:#0ff; }
+  #back-btn.visible { display:block; }
+
+  /* Bottom HUD bar */
+  #hud {
+    position:fixed; bottom:0; left:0; right:0; height:28px;
+    background:rgba(0,4,10,0.92); border-top:1px solid rgba(0,255,255,0.2);
+    display:flex; align-items:center; padding:0 16px; gap:24px;
+    color:rgba(0,255,255,0.5); font-size:10px; letter-spacing:1px; z-index:50; pointer-events:none;
+  }
+  #hud span { display:flex; align-items:center; gap:6px; }
+  #hud .dot { width:8px; height:8px; border-radius:50%; display:inline-block; flex-shrink:0; }
+  #hud .sep { color:rgba(0,255,255,0.2); }
+</style>
+</head>
+<body>
+
+<div id="toolbar">
+  <span id="toolbar-title">BJJ · CONCEPT MAP</span>
+  <div id="searchbar">
+    <input id="search-input" type="text" placeholder="SEARCH CONCEPTS..." autocomplete="off" spellcheck="false"/>
+    <button class="clear-btn" id="clear-search">✕</button>
+  </div>
+  <span id="search-count"></span>
+  <span id="toolbar-spacer"></span>
+  <button id="filter-btn">FILTER <span id="filter-count">ALL</span></button>
+</div>
+
+<button id="back-btn">← BACK</button>
+<canvas id="c"></canvas>
+<div id="tooltip"></div>
+
+<div id="filter-modal">
+  <div id="filter-panel">
+    <div id="filter-header">
+      <h2>⬡ FILTER CONCEPTS</h2>
+      <span class="close-btn" id="close-filter">✕</span>
+    </div>
+    <div id="filter-actions">
+      <button id="select-all">SELECT ALL</button>
+      <button id="select-none">CLEAR ALL</button>
+    </div>
+    <div id="filter-body"></div>
+    <div id="filter-footer">
+      <span class="count" id="visible-count">0 concepts visible</span>
+      <button id="apply-btn">APPLY</button>
+    </div>
+  </div>
+</div>
+
+<div id="card-modal">
+  <div id="card-inner">
+    <div id="card-header">
+      <div>
+        <div id="card-title"></div>
+        <div id="card-cat"></div>
+      </div>
+      <span id="card-close">✕</span>
+    </div>
+    <div id="card-body"></div>
+  </div>
+</div>
+
+<div id="hud">
+  <span><div class="dot" style="background:#0ff;box-shadow:0 0 4px #0ff"></div> QUADRANT</span>
+  <span class="sep">|</span>
+  <span><div class="dot" style="background:#f0f;box-shadow:0 0 4px #f0f"></div> CATEGORY</span>
+  <span class="sep">|</span>
+  <span><div class="dot" style="background:#ff0;box-shadow:0 0 4px #ff0"></div> CONCEPT</span>
+  <span class="sep">|</span>
+  <span>DRAG PAN · SCROLL ZOOM · HOVER NODE · CLICK CATEGORY</span>
+</div>
+
+<script>
+const RAW = [{"id":"BJJ-001","concept":"Involuntary Yoga","desc":"Somewhat funny.  BJJ is involuntary yoga, because we put you in funky twisted positions! AHAHA, ahah. ah.","cat":"Memes","x":0.92,"y":0.76},{"id":"BJJ-002","concept":"Collapse Frames","desc":"Frames are typically strong in one direction yet can be collapsed in another.","cat":"Grappling Primitives","x":0.2,"y":0.2},{"id":"BJJ-003","concept":"Grip Fighting","desc":"Controlling and breaking grips to dominate exchanges.","cat":"Grappling Primitives","x":0.3,"y":0.3},{"id":"BJJ-004","concept":"Anticipation","desc":"Anticipation is the first line of defense.  Don't be surprised by a guard pull or a jumping armbar. You should know what threats are possible from any given positions.","cat":"Grappling Primitives","x":0.9,"y":0.1},{"id":"BJJ-005","concept":"Art & Science","desc":"\"BJJ is the Art & Science of Control Leading to Submission\".  Chris Haueter I believe.   I like this one, it's laconic an accurate.","cat":"Memes","x":0.83,"y":0.68},{"id":"BJJ-007","concept":"Murder Yoga","desc":"see. Involutary Yoga, with a more r/iambadass vibe.","cat":"Memes","x":0.92,"y":0.86},{"id":"BJJ-008","concept":"Legal Strangulation","desc":"Where the dojo becomes a place where consenting adults can legally strangle each other for their personal fullfilment.","cat":"Memes","x":0.72,"y":0.65},{"id":"BJJ-009","concept":"Patience (5/7)","desc":"#1/21 one of the \"7P's\" in Paulo Guillobel's 21 immutable principles of Jiu Jitsu.","cat":"21 Immutable Principles","x":0.87,"y":0.66},{"id":"BJJ-010","concept":"#1/21 \"7 P's\"","desc":"#1/27 by Paulo Guillobel.\nPosition, Posture, Pressure, Proper Balance, Precision\n\nPersistence & Patience moved to \"Mental\" quadrant.","cat":"21 Immutable Principles","x":0.43,"y":0.67},{"id":"BJJ-011","concept":"#2/21 Chess Analogy","desc":"#2/21 by Paulo Guillobel.\n\nThe Chess Analogy is certainly not *Uniquely* appropriate to grappling.  Football, soccer, or any sports involving positioning and decisions will have some chess analogies.   Pieces have values, controlling the center is advantageous, be 3 moves ahead, etc.","cat":"21 Immutable Principles","x":0.73,"y":0.44},{"id":"BJJ-012","concept":"#4/21 Zen","desc":"#4/21 Chill. In training and in the midst of competition.  Clear mind. From Paulo Guillobel's 21 immutable principles of Jiu Jitsu.","cat":"21 Immutable Principles","x":0.96,"y":0.84},{"id":"BJJ-013","concept":"#5/21 Flow like water","desc":"Brucee lee and others before him.  #5/21 in Paulo Guillobel's 21 principles.","cat":"21 Immutable Principles","x":0.48,"y":0.53},{"id":"BJJ-014","concept":"#6/21 Braveheart","desc":"Dive in, get rid of your fear of losing, especially during training.  #6/21 in Paulo Guillobel's 21 immutable principles of Jiu Jitsu.","cat":"21 Immutable Principles","x":0.78,"y":0.67},{"id":"BJJ-015","concept":"#7/21 Improve Position","desc":"Constantly improve your position. Ideally you never lose ground and go back, every advantage builds up and snowball into total control.","cat":"21 Immutable Principles","x":0.4,"y":0.76},{"id":"BJJ-016","concept":"#8/21 Biggest Leak First","desc":"Address your biggest problem first. Typically what is giving your opponent the most leverage right now? adress that.  In practice, what's your biggest weakness? identify and address.","cat":"21 Immutable Principles","x":0.82,"y":0.52},{"id":"BJJ-017","concept":"#9/21 Overreaching","desc":"Avoid overreaching (grab too far, maintain a grip that is compromised, try to finish a submission that is now too low percentage, etc.)","cat":"21 Immutable Principles","x":0.46,"y":0.52},{"id":"BJJ-018","concept":"#10/21 Fortress","desc":"Think of your body in layers of defense.  Wrestlers talk about \"climbing the ladder\".  This is similar, rebuild your defenses; feet, knees, hands, elbow.  If compromised, rebuild the fortress.","cat":"21 Immutable Principles","x":0.55,"y":0.52},{"id":"BJJ-019","concept":"#11/21 Action & Reaction","desc":"Create action to bait reaction, watch the opponent's head velocity and add to it.  Bait & Trap.  Beware of counter-productivity.","cat":"21 Immutable Principles","x":0.46,"y":0.11},{"id":"BJJ-020","concept":"#12/21 Anatomy","desc":"Extra pressure from toes, feet always busy, where to grab.  General awareness of the human anatomy to better use it.","cat":"21 Immutable Principles","x":0.45,"y":0.39},{"id":"BJJ-021","concept":"#13/21 let the enemy defeat himself.","desc":"Gas out.  Let him make mistakes.  Be comfortable, low energy as they struggle.  give up lost positions to get advantage in the next battle, weakness identification, improve position, retreat if compromised.","cat":"21 Immutable Principles","x":0.72,"y":0.23},{"id":"BJJ-022","concept":"#14/21 Basics > Shiny","desc":"in general, extremely honed basics will serve you better than flashy shiny new techniques.  ","cat":"21 Immutable Principles","x":0.91,"y":0.8},{"id":"BJJ-023","concept":"#15/21 Big Rock","desc":"Don't embrace the big rock (hugging someone on top of you), push it sideways, make your way under, etc.","cat":"21 Immutable Principles","x":0.35,"y":0.24},{"id":"BJJ-024","concept":"#16/21 Fine Line","desc":"Switch modes, get a head start on the next move.  There's a fine line between something you can still use and something that will soon become detrimental.","cat":"21 Immutable Principles","x":0.88,"y":0.44},{"id":"BJJ-025","concept":"#17/21 Energy Management","desc":"Your gas tank is not infinite.  Maybe enough energy for a few bursts.  Don't redline all the time.","cat":"21 Immutable Principles","x":0.5,"y":0.93},{"id":"BJJ-026","concept":"#18/21 Real Estate","desc":"\"location, location, location\".  Make them pay dearly for access to the good locations.  Elbows to knees, elbow to pelvis. head control.","cat":"21 Immutable Principles","x":0.29,"y":0.5},{"id":"BJJ-027","concept":"#19/21 Max Pressure","desc":"Pick a side, pick a spot, hand/feet to add/redirect force.  Firm not stiff. Don't leak pressure where it does not affect them.","cat":"21 Immutable Principles","x":0.43,"y":0.9},{"id":"BJJ-028","concept":"#20/21 Limb vs Limb","desc":"2-on-1, 3-on-1, be uneven in your favor. Overwhelm.","cat":"21 Immutable Principles","x":0.31,"y":0.37},{"id":"BJJ-029","concept":"#21/21 Base","desc":"\"Wind, wood, fire, mountain\".  Lose the fear of being swept.  You are a cat and someone is trying to push you into water.  Always have a body part ready to establish base.","cat":"21 Immutable Principles","x":0.18,"y":0.9},{"id":"BJJ-030","concept":"6DoF","desc":"six degrees of freedom.  Realize there's more to mobility than left-right front-back.  6DoF (Six Degrees of Freedom)\n\nRefers to the six independent axes of movement a body can perform in 3D space:\n\nTranslation: forward/back (x), up/down (y), left/right (z)\n\nRotation: pitch (tilt up/down), yaw (turn left/right), roll (tilt side to side)\n\nIn BJJ and grappling:\n\nControlling an opponent means removing their degrees of freedom, one by one—pin the hips (blocks translation), isolate the shoulder (limits rotation), hook a leg (anchors a pivot).\n\nEscaping involves regaining degrees of freedom—hip escape restores translation, underhook returns rotational access.\n\nBiomechanically, the joints themselves have varying DoF (e.g., shoulder: 3 rotational DoF; knee: primarily 1). Training should build awareness of how to exploit or limit these DoF during transitions and submissions.\n\nGrappling, at its core, is 6DoF chess—with gravity and friction.\n\nTranslation: Linear movement through space—changing position.\n\nIn the body: shifting your hips during a shrimp, stepping forward for a takedown, bridging upward from bottom.\n\nIn 6DoF: represented by movement along x (left-right), y (up-down), z (forward-back).\n\nRotation: Angular movement around an axis—changing orientation.\n\nIn the body: turning your torso during a granby roll, rotating the arm for an underhook, rolling over a shoulder.\n\nIn 6DoF: pitch (nodding), yaw (shaking head \"no\"), roll (tilting head sideways).\n\nVibration: Micro-oscillations—rapid, often involuntary, repetitive motion. Not formally part of 6DoF, but biomechanically critical.\n\nIn the body: muscle spindle reflexes, tremors under fatigue, or rapid shaking to disengage grip pressure.\n\nIn grappling: can disrupt tension (micro-movements to break static grips), signal neuromuscular fatigue, or be used tactically (e.g., shimmying to unsettle base).\n\nSummary:\n\n6DoF = 3 translation + 3 rotation.\n\nVibration = higher-frequency motion layered on top of those freedoms—mechanically minor, neurologically significant.\n\nControl in grappling comes from limiting opponent's translation and rotation; understanding vibration improves sensitivity and adaptability.","cat":"Grappling Primitives","x":0.05,"y":0.96},{"id":"BJJ-031","concept":"Form Tension","desc":"Form tension in biomechanics refers to the internal force generated within a structure—such as a muscle, tendon, or connective tissue—when it is stretched or deformed, acting to resist the applied load and maintain the shape or integrity of the structure. This tension is a combination of passive (from non-contractile elements like connective tissue) and active (from contractile muscle fibers) components, and is fundamental for stabilizing and supporting body forms during movement and posture.   See Peng in Taichi.    The baseline muscular engagement required to maintain structural integrity during movement or static holds. Not maximal contraction—just enough to preserve alignment, transmit force, and prevent collapse under external load or pressure.\n\nIn grappling, form tension stabilizes frames, connects kinetic chains, and prevents overextension or sagging. Too little: collapse under pressure. Too much: wasted energy, sluggish transitions.\n\nBiomechanically, it manifests as isometric co-contraction (agonist + antagonist) across joints—common in closed guard, tripod base, or during guard passing posture. Good training teaches athletes to modulate tension: spike during bracing, relax during flow.\n\nEfficient grapplers breathe under load—keeping form tension without rigidity.","cat":"Grappling Primitives","x":0.22,"y":0.69},{"id":"BJJ-032","concept":"Empathy","desc":"What's their way out? what do they want? How bad are they feeling the pressure.  Have empathy so you can deny them what they crave most.","cat":"Grappling Primitives","x":0.96,"y":0.34},{"id":"BJJ-033","concept":"Real-Time Learning","desc":"Learn something about your opponent from each grip and move and reaction. Update your knowledge about them in real time.  OODA Loop Adjacent.  (Observe-Orient-Decide-Act)","cat":"Tactics","x":0.86,"y":0.32},{"id":"BJJ-034","concept":"Funnel","desc":"Make them play your game on your terms, avoid playing theirs.","cat":"Tactics","x":0.84,"y":0.21},{"id":"BJJ-035","concept":"Overload their system","desc":"Threats and distractions everywhere.","cat":"Tactics","x":0.8,"y":0.07},{"id":"BJJ-036","concept":"Bait & Trap","desc":"Create triggers. Offer your back so you get a chance at a Kimura, turtle and attack their arm, give them a Triangle to create a passing opportunity (a la Wim's Queen Gambit), etc.","cat":"Tactics","x":0.59,"y":0.39},{"id":"BJJ-037","concept":"Suspicion","desc":"If you did not create the position, be suspicious","cat":"Tactics","x":0.95,"y":0.2},{"id":"BJJ-038","concept":"Golden Mean","desc":"Golden Mean in everything.  Moderation in everyting, including moderation.","cat":"Grappling Primitives","x":0.87,"y":0.77},{"id":"BJJ-039","concept":"Puzzle Solving","desc":"Reduce the ego, think of though opponents as interesting puzzles to try to solve.   The cognitive process of real-time problem decomposition under physical stress. Involves recognizing patterns (guard types, grips, reactions), generating hypotheses (what happens if I post here?), and applying feedback loops through kinesthetic trial. Athletes cycle through micro-adjustments—angle, timing, leverage—seeking stable control or submission.\n\nBiomechanically, it engages proprioception, spatial reasoning, and fine motor control. Neurologically, it reinforces myelination of adaptive movement sequences. Training should emphasize constraint-based sparring: isolating problems (e.g., escaping mount) forces repeated exposure to solve under pressure.\n\nIn essence: chess with pain compliance.","cat":"Grappling Primitives","x":0.96,"y":0.89},{"id":"BJJ-040","concept":"Heuristics","desc":"Fast, experience-based rules-of-thumb used to make real-time decisions under pressure. Heuristics reduce cognitive load by replacing exhaustive analysis with pattern recognition and tactical defaults.\n\nHeuristics ≠ techniques. They’re decision frameworks that reduce chaos into action.\n\nThey should be taught alongside techniques as meta-skills.\n\nGood heuristics are adaptive, not rigid.\n\nHeuristics are simplification.  All simplifications are wrong, but some are useful.\n\nWhy Heuristics Matter\nGrappling is dynamic and chaotic.\n\nTime for deep reasoning = zero.\n\nHeuristics enable speed with survivability—even if not always optimal, they are robust.\n\nExamples of BJJ Heuristics\nHeuristic;Application\n“Frame when you can’t move, move when you can’t frame”;Guides positional defense.\n\n“Two on one beats one”; Arm drag, grip breaking, shoulder control.\n\n“Head higher, hips heavier”;Passing posture, pressure principles.\n\n“If they post, you sweep”;Cue for transitioning from submission to reversal.\n\n“Control the inside space”;Dominant frames, underhooks, collar ties.\n\n“If you can see the back, take it”;Positional hierarchy—reward opportunity.\n\n“When in doubt, fight for the underhook”\tUniversal in scrambling and control.\n\n“If they push, pull. If they pull, push.”\t;Kuzushi and tempo control.\n\nHeuristics in BJJ are mental guardrails. They trade perfect choices for fast, repeatable, mostly-right actions under pressure. They're how instincts are built—and how instinct wins.\n\nYou use heuristics to frame your training, and hopefully once they're integrated you don't need to think about them anymore.  Unconscious Competence.","cat":"Training","x":0.86,"y":0.87},{"id":"BJJ-041","concept":"Always Protect Yourself","desc":"Don’t Put Yourself at the Mercy of Others.  In training, relying solely on your partner’s control, restraint, or decision-making to avoid injury can be reckless. A single mistake can result in sudden, serious injury.  Position before trust.  Your safety is your responsibility.  Don't outsource control.  \n\nAvoid hanging in an inverted position where their weight might drop on you suddenly and spike your spine.\n\nDon't be **too loose, loads of slack in, say, your arm while trying to escape and you miss the sudden bridging pressure and can't tap in time.\n\nBad heel hook defense trying to tough it out.\n\nWait until you feel pain beefore tapping.","cat":"Training","x":0.4,"y":0.58},{"id":"BJJ-043","concept":"2/32 Detachment","desc":"","cat":"32 Principles","x":0.11,"y":0.5},{"id":"BJJ-042","concept":"Last Battle","desc":"Do no fight the last battle.   Realize when the game has changed, when the battleground has shifted.   Accept that your defenses have failed and switch to damage mitigation and recovery.\n\nsimilar to Keenan's \"Win small battles then don't realize are happening\" (about passing over the knee in worm guard)","cat":"Tactics","x":0.33,"y":0.33},{"id":"BJJ-044","concept":"4/32 Pyramid","desc":"Stable base, triangles everywhere, what's not to love about a pyramid analogy!?","cat":"32 Principles","x":0.07,"y":0.95},{"id":"BJJ-045","concept":"5/32 Creation","desc":"Create opportunities, be proactive and not just reactive.","cat":"32 Principles","x":0.57,"y":0.5},{"id":"BJJ-046","concept":"6/32 Acceptance","desc":"Yield when necessary, if resistance is futile or too energy-intensive, go around, accept the force, work around it, use their force against them.","cat":"32 Principles","x":0.5,"y":0.96},{"id":"BJJ-047","concept":"7/32 Velocity","desc":"Control the speed, decelerate with weight and pressure or accelerate with disengagement, be on  your terms.  Keenan would call it Tempo.","cat":"32 Principles","x":0.07,"y":0.64},{"id":"BJJ-049","concept":"8/32 Clock, Timing","desc":"\"Timing beats speed, precision beats power\" -- Some Irish guy, probably.\n\nWith control you can anticipate, with anticipation you can time your next move to catch them off balance.  Capitalize on opportunities you know will be coming and you're waiting for.","cat":"32 Principles","x":0.99,"y":0.67},{"id":"BJJ-050","concept":"9/32 River","desc":"another way to say \"flow like water\". 流 The kanji for flow has a river element.  Or perhaps \"No man ever has the same roll twice\" Heraclitus 550BC.   Because it's not the same river and we're not the same athletes.  Flow around obstacles, fill that teacup.  Oh and water can crush too.","cat":"32 Principles","x":0.46,"y":0.53},{"id":"BJJ-052","concept":"11/32 Kuzushi","desc":"I feel like this deserves more than to be #11.  it's one of the key concepts of Judo.  Kuzushi|Tsukuri|Kake.  In this list of 32 it's defined as the Opposite the Pyramid.  They have a base? you want to disrupt it.  Endless area of research.","cat":"32 Principles","x":0.1,"y":0.09},{"id":"BJJ-053","concept":"12/32 Reconnaissance","desc":"Reckon team is any point of contact, constantly gather intelligence about your opponent's intention and style and movements and habits.  Anything can and will be used against you.","cat":"32 Principles","x":0.73,"y":0.28},{"id":"BJJ-054","concept":"13/32 Prevention","desc":"\"a pound of prevention is worth a ton of cure\".  -- Benjamin Franklin, 1735, probably.  He was not talking about BJJ, or medicine, but fire safety of Philadelphia.  Same concept.  Deal with problems before they get worse.  Deny that pesky pant grip, keep your elbows tight before someone puts on a Dagestani cuff on.","cat":"32 Principles","x":0.34,"y":0.3},{"id":"BJJ-055","concept":"14/32 Tension (Apply & Release)","desc":"Offer tension then release it when they try to use it against you, like being a step-that-is-not-there in a flight of stairs, divulge your intent to attack in one spot with focused tension, only to release it and divert your 2-on-1 somewhere else.","cat":"32 Principles","x":0.15,"y":0.1},{"id":"BJJ-056","concept":"15/32 Fork","desc":"My take is that it's essentially dilemmas under another name.  Fork in the road, choose one way, but both have their risks.  Force the opponent to make choices, at one point they'll make the wrong one.","cat":"32 Principles","x":0.62,"y":0.6},{"id":"BJJ-057","concept":"16/32 Posture","desc":"Strong body alignment is necessary for lifting and even walking, BJJ is no exception.  Note that another concept defines posture as only being one part of \"alignment\", along with base and structure (thanks Canucks!).  Similar ideas.","cat":"32 Principles","x":0.41,"y":0.65},{"id":"BJJ-058","concept":"17/32 False Surrender","desc":"Feign yielding to lure your opponent into overcommitting, creating openings for counters.   A trap by another name, with the added nuance that you make them believe something they just did worked, rather than passively waiting.","cat":"32 Principles","x":0.62,"y":0.29},{"id":"BJJ-059","concept":"19/32 Isolation","desc":"Divide and conquer.  Apes together strong, ape alone weak.  Isolate a limb and start attacking it with overwhelming force, preventing reinforcement from coming to the rescue.","cat":"32 Principles","x":0.09,"y":0.18},{"id":"BJJ-060","concept":"18/32 Depletion","desc":"Mentally and physically deplete your opponent.  Wear down their energy and resolve to increase their likelihood of making mistakes.","cat":"32 Principles","x":0.5,"y":0.08},{"id":"BJJ-061","concept":"20/32 Sacrifice","desc":"Sacrifice something real or perceived, willingly give up position, grip, or apparent advantage to bait your opponent and gain a greater benefit.  Bait & Trap variations.","cat":"32 Principles","x":0.82,"y":0.65},{"id":"BJJ-062","concept":"21/32 Momentum","desc":"Harness and redirect your opponent’s movement to amplify your own techniques.  Similar to \"give them more than they bargained for\" or \"yielding so there's an empty step\".  Fluid momentum, force errors that they can't correct fast enough.","cat":"32 Principles","x":0.16,"y":0.27},{"id":"BJJ-063","concept":"22/32 Pivot","desc":"Pivots in biomechanics are used to generate force and evade force.  It's essentially a specific use of a fulcrum, used to move rather than apply torque.  Rotation, mobility, redirection.\nFind pivot points to  rotate, change angles, escape, or position yourself more efficiently.\n\n\nDual Use of Pivots/Fulcrums in Biomechanics\nFor Offense; Leverage & Force Application \nPivot points (joints, grips) enable torque by creating rotational force around them.\nUsed to amplify power (e.g., armbars, levers, throws).\n\nFor Defense; Escape & Energy Redirection\nPivot points (body contact points) act as anchors for rotating the body away from danger.\nUsed to evade force efficiently (e.g., hip escapes, granby rolls).","cat":"32 Principles","x":0.27,"y":0.82},{"id":"BJJ-064","concept":"23/32 Tag Along","desc":"Tag Along (Connect, Sticky)\nMaintain constant attachment to your opponent, following their movement to prevent escapes or counters.   It's linked to the stickiness (Nian 黏) and listening (聽勁 Ting Jing skills) found in chinese arts.","cat":"32 Principles","x":0.4,"y":0.09},{"id":"BJJ-065","concept":"24/32 Overload","desc":"Apply multiple resources (like both hands, or one hand and knee, etc.) to control a single part of your opponent, overwhelming their defenses.","cat":"32 Principles","x":0.41,"y":0.87},{"id":"BJJ-066","concept":"25/32 Anchor","desc":"Secure a stable point of connection to prevent your opponent’s movement and establish control.  Or hook yourself to the opponent so he can't move without having to bear your weight.","cat":"32 Principles","x":0.44,"y":0.26},{"id":"BJJ-067","concept":"26/32 Ratchet","desc":"Make incremental, irreversible gains in position or control, never giving back ground once taken.  The famous Finger-Crawl from mount is one example, slowly gaining ground on a rear strangle is another.","cat":"32 Principles","x":0.05,"y":0.71},{"id":"BJJ-068","concept":"27/32 buoyancy","desc":"They mean this one as \"bubbles of water always find a way to the surface\", and similarly when you're on the bottom you need to find ways for varies parts of your body to naturally evade the pressure and come back up.  Find the cracks, get back on top.","cat":"32 Principles","x":0.2,"y":0.76},{"id":"BJJ-069","concept":"28/32 Head Control","desc":"Where the head goes, the body follows.  The human head is heavy and destabilizes the entire body when brought outside the base of support.  use it to your advantage, keep your own head from being controlled.","cat":"32 Principles","x":0.26,"y":0.17},{"id":"BJJ-070","concept":"29/32 Redirection","desc":"Sounds like Lu (履) in Taichi – Rolling/Deflecting Force (Yield & Redirect)\nIn biomechanics it would be rotational pivot around a central axis (like shoulder/hip/forearm), using circular redirection.\n\nApplication is to evades force by leading it off-center, like a door swinging, \"using their force against them\".","cat":"32 Principles","x":0.29,"y":0.3},{"id":"BJJ-071","concept":"30/32 Mobility","desc":"\"move yourself when you cannot move your opponent\".  Move around the obstacles.","cat":"32 Principles","x":0.2,"y":0.85},{"id":"BJJ-072","concept":"31/32 Centerline","desc":"Key concept in all martial arts and more.  You can control the inside space, or push/drag a limb across the centerline.  ","cat":"32 Principles","x":0.07,"y":0.27},{"id":"BJJ-073","concept":"32/32 Grandmaster","desc":"This is this model's take on constant kaizen.  Constantly applying and building on all the principles to improve your art.  Always seeking efficiency.","cat":"32 Principles","x":1,"y":0.97},{"id":"BJJ-075","concept":"Vibration","desc":"Vibration, or jerking; used by Jason Scully and the DDS (Kipping mount escape among else).   Short jerky motions to overload the proprioception of the opponent.  collar ties, grips; etc:","cat":"Grappling Primitives","x":0.15,"y":0.78},{"id":"BJJ-076","concept":"Fascia Activation","desc":"Fascia activation refers to the stimulation or engagement of the body’s connective tissue network (fascia) through movement, load, or specific exercises, prompting it to respond mechanically and metabolically to support posture, force transmission, and tissue health.","cat":"Grappling Primitives","x":0.06,"y":0.86},{"id":"BJJ-077","concept":"Loading & Unloading","desc":"Loading and Unloading Limbs\n\nRefers to the shifting of weight and tension through the limbs to enable or restrict movement—core to mobility, balance, and attack setups in grappling.\n\nLoading = transferring weight onto a limb.\n\nFunction: creates base, applies pressure, pins opponent.\n\nExample: posting a leg during a guard pass, weighting an elbow to trap an arm.\n\nBiomechanics: compressive force through joints; engages stabilizers and closes kinetic chains.\n\nUnloading = removing weight from a limb.\n\nFunction: frees limb for movement, redirection, or attack.\n\nExample: lifting a foot for a knee cut, freeing an arm to post or grip.\n\nBiomechanics: initiates open-chain movement; reduces friction and muscular load.\n\nTraining Implication: Elite grapplers cycle load dynamically—loading to create structure, unloading to strike or transition. Mastery lies in timing: unloading just as balance is preserved elsewhere.\n\ne.g. : if the knee is above the heel, pointing upwards, the leg is loaded and a shin-to-shin won't be very effective.  if their knee is forward, the foot will be lighter, and shin-to-shin might be very effective.","cat":"Grappling Primitives","x":0.33,"y":0.87},{"id":"BJJ-078","concept":"Cloth Tension","desc":"Cloth Tension (in Judo)\n\nThe tautness or slack in the gi, created through grip, body positioning, and movement. It serves as a tactile feedback system and force transmission medium.\n\nTight Cloth: Indicates connection. Force applied through the grip transmits efficiently. Enables kuzushi (off-balancing), control, and entries.\n\nExample: pulling the sleeve tight while circling sets up a seoi nage.\n\nBiomechanically: cloth behaves like a tensioned ligament—storing and releasing energy, guiding direction.\n\nLoose Cloth: Reduces connection. Slows force transfer, blunts responsiveness. Can be defensive (to prevent grip breaks) or offensive (to bait reactions).\n\nExample: slackening the lapel grip to induce overcommitment, then re-engaging.\n\nNeuromechanical cue: athletes often read slack/tension changes to anticipate attacks.\n\nTraining Methodology:\nDrills should cultivate tension awareness—feeling when cloth is \"live\" vs \"dead.\" Smart grip fighting isn’t just where you grip, but how tension is maintained or manipulated.\n\nIn short: control the cloth, and you control the connection.","cat":"Grappling Primitives","x":0.3,"y":0.1},{"id":"BJJ-079","concept":"Joint Slack","desc":"Joint Slack\n\nThe small range of passive, non-resistant movement within a joint before structural or muscular tension engages—pre-tension space.\n\nFunctionally: It's the \"dead zone\" before control kicks in.\n\nIn grappling, this is the danger window—where limbs can be moved or twisted before the opponent senses or resists.\n\nExample: a straight armbar exploits elbow slack; once it's gone, tension spikes and injury risk follows.\n\nBiomechanically: Joint slack is governed by capsular laxity, ligament elasticity, and neuromuscular readiness. More slack = more mobility, less stability.\n\nAthletes with high slack (hypermobility) can escape deeper into submissions—but risk delayed injury cues.\n\nAthletes with low slack (tight joints) are harder to manipulate but less flexible under pressure.\n\nTraining Insight:\n\nControl = removing slack: applying grips or pins that take up joint slack limits opponent’s movement options.\n\nDefense = exploiting slack: creating micro-movements within slack zones buys time, space, and reversal windows.\n\nSummary:\nJoint slack is the hidden gap between freedom and control. Mastery is learning to feel and eliminate it—first in others, then in yourself.","cat":"Grappling Primitives","x":0.03,"y":0.5},{"id":"BJJ-080","concept":"Proprioception","desc":"The body's internal sense of position, movement, and force—joint awareness without sight. It's how you know where your arm is in space, or how much pressure you're applying, even with eyes closed.\n\nIn grappling: Proprioception guides balance, grip adjustment, limb positioning, and subtle angle changes under resistance.\n\nExample: adjusting hip angle in closed guard to set up an armbar without visual confirmation.\n\nHigh-level athletes can “read” opponents through tactile input alone—via pressure, resistance, and micro-movements.\n\nBiomechanically: Relies on mechanoreceptors in muscles (muscle spindles), tendons (Golgi tendon organs), and joint capsules. Fast, subconscious feedback loops.\n\nTrained proprioception enables smoother transitions, better weight distribution, and earlier detection of imbalance or threat.\n\nTraining Methodologies:\n\nClosed-eye drills, unstable surfaces, flow rolling, and positional sparring under constraint sharpen this system.\n\nInjury often disrupts proprioception—rehab must include retraining it, not just strength.\n\nIn essence: Proprioception is your sixth sense on the mat—feel without seeing, react without thinking.","cat":"Grappling Primitives","x":1,"y":0.98},{"id":"BJJ-081","concept":"Alioception","desc":"analogous to proprioception, but directed outward to the opponent. Afaik Coined by me Jelaludo.  \n\nAlioception: the embodied sense of an opponent’s position, movement, and balance state through direct contact—enabling reactive and anticipatory adjustments in grappling.\n\nFrom Latin alius (“other”) + -ception (“perception”)\n\nThe embodied capacity to detect, interpret, and respond to the position, movement, tension, balance, and intention of another person's body through direct physical contact. Unlike proprioception, which governs awareness of one’s own body, alioception operates outwardly—enabling real-time adaptation to external forces, subtle shifts in pressure, and structural vulnerabilities in an opponent.\n\nIn grappling, alioception underpins timing, sensitivity, and control. It allows practitioners to \"feel\" openings before they appear visually, to preempt resistance, and to maintain dynamic connection without overcommitting. It blends tactile input, kinesthetic intuition, and neuromuscular calibration into an opponent-centered perceptual system.\n\nIn short: alioception is the trained sense of the other’s body, through your own.\n\nI see a similarity with Listening Skills in Taichi.\n\nListening Skill – 聴勁 / tīng jìn\nLiteral meaning: “Listening energy” or “Listening force”\n\nDefinition: The refined ability to perceive the opponent’s intention, balance, structure, and movement through touch—without relying on sight.\n\nPracticed through constant physical contact (sticky hands, push hands), it trains the practitioner to feel shifts in pressure, alignment, relaxation, or tension.\n\nIt’s not passive—it's an active, receptive awareness, like a radar tuned to another's body dynamics.\n\nTing jin emphasizes intent and energy; alioception leans into biomechanics and contact strategy, but they overlap in function.\n\nBoth are trainable through constant-contact drills, sparring, and tactile sensitivity work.\n\nBoth reject reliance on visual cues, favoring a deep embodied reading of the opponent.","cat":"Grappling Primitives","x":0.99,"y":0.03},{"id":"BJJ-082","concept":"Far-End Lever","desc":"The specific point on a skeletal or soft-tissue lever—external or internal—where minimal force yields maximal positional or structural disruption to the target segment.\n\nIt's about mechanical advantage, not just limb length.\n\nWrist twist via carpal stack: Rotating the wrist by isolating bones at the base of the palm—not just bending the hand, but spiraling the radiocarpal lever to lock the forearm.\n\nKnee as a hip lever: Applying torque to the tibia/fibula to realign or fold the femur—used in knee cuts, leg locks, or half guard passing.\n\nElbow as an upper-arm handle: Not just breaking structure, but using elbow torque to reorient the shoulder girdle (e.g. kimura, shoulder clamp).\n\nSkull base / occiput control: Levering the base of the skull (not crown) to disrupt spinal alignment—used in guillotines, rear-naked chokes, or cervical control.\n\nMandible or chin lever: Control at the far end of the jaw provides torque over the cervical spine—used in face cranks, chin straps, or arm triangle adjustments.\n\nIn simple mechanical terms—yes, the force transmission in levers is often linear under ideal conditions. A 10% maladjustment at the far-end (wrong angle, suboptimal grip, slight slack) can equate to a 10% loss in force or control. But in grappling, it gets more nuanced:\n\nIn Theory (Ideal Lever Mechanics)\nForce output at the far end of a lever is:\n\nTorque = Force × Distance × sin(θ)\n\nA deviation in θ (angle), grip placement, or line of pull directly reduces torque.\n\nThus, a 10% error in geometry → ~10% efficiency loss, assuming all else is equal. Linear relationship.\n\nIn Grappling (Applied Reality)\nStill mostly linear—but layered with threshold effects and nonlinear break points:\n\nUnderload Zone\n\n<10% loss: feelable but manageable\n\nSlight inefficiencies accumulate but don’t ruin the technique.\n\nThreshold Breach (~15–25%)\n\nLeverage drops below control threshold.\n\nOpponent regains degrees of freedom → escapes, rotates, posts.\n\nOverload Zone\n\nExcess force applied due to poor lever = wasted energy, self-exposure, or even self-injury.\n\nGrappling is built on levers, levers reward precision.\n\nKey Principles:\nEvery joint is a lever, with a localized fulcrum and multiple usable \"far ends\".\n\nNested levers exist: wrist within elbow, skull within neck, scapula within thorax.\n\nOptimal control points are not always the most distal—but the most structurally efficient for torque, disruption, or redirection.\n\n🔬 Training Implication:\nTrain awareness of micro-levers and bone stack manipulation.\n\nRecognize that precision at the far end yields results up the chain.\n\nExplore positional drilling that teaches students to \"climb the lever backwards\"—from far-end contact to root disruption.\n\nSummary:\nFar-end leverage is not about distance—it's about influence. Grappling mastery comes from identifying and exploiting the lever point that does the most with the least.","cat":"Grappling Primitives","x":0.06,"y":0.06},{"id":"BJJ-083","concept":"Knee-Elbow","desc":"A biomechanical closed frame formed by connecting the knee and elbow on the same side of the body. It is one of the most fundamental and versatile defensive structures in grappling.\n\n🛡️ Primary Function: Structural Defense\nConnects upper and lower body into a compact shell.\n\nProtects against crossface, underhooks, and leg penetration.\n\nPrevents opponent from inserting wedges between limbs (e.g., knee slices, body locks).\n\n⚙️ Biomechanics:\nClosed kinetic chain: Elbow and knee reinforce each other via core tension and skeletal alignment.\n\nLow energy cost: Once connected, minimal muscular effort required to maintain posture.\n\nMobile base: Can shift, pivot, or bridge while maintaining structural integrity.\n\n🔁 Applications in Grappling:\nContext\tUse\nGuard retention\tReconnect frame during inversion or shrimping.\nBottom side control\tKnee-elbow recovery to reinsert guard.\nMount escape\tFrame inside knee to trap and bridge.\nPassing prevention\tBlock incoming knee slice or smash pass.\nBack defense\tElbow fights hook; knee tucks to block second hook.\n\n🧠 Tactical Principle:\n“If you lose frames, reattach elbow to knee.”\n\nIt’s a reset button for defensive posture—restoring structure, slowing momentum, and buying time to rebuild position.\n\n🧩 Training Focus:\nRepetition under fatigue: train instinct to reconnect elbow to knee under pressure.\n\nCombine with hip escape, inversion, and turtle transitions.\n\nSummary:\nKnee-elbow is the grappler’s shield. It’s compact, efficient, and adaptable. Learn it, keep it, rebuild it—it's your first line of survival.","cat":"Grappling Primitives","x":0.19,"y":0.81},{"id":"BJJ-084","concept":"Wedges","desc":"A wedge is a structural insertion that creates or preserves space, disrupts alignment, or amplifies force. In grappling, wedges are anatomical tools—elbows, knees, feet, hands—placed between the opponent and the ground or between limbs to create mechanical advantage.\n\n🔩 Core Functions:\nDisrupt Structure – Break posture, frames, or base\n\nCreate Leverage – Serve as pivot points for sweeps or submissions\n\nMaintain Space – Prevent opponent from collapsing into dominant position\n\nTransfer Force – Direct energy into weak structural angles (e.g., armpit, hip crease)\n\n🦴 Biomechanical Reality:\nA wedge is effective when it's:\n\nInserted deep (near fulcrum)\n\nStructurally aligned (bones stacked, tension braced)\n\nTimed under pressure (before collapse or counter)\n\nElbow inside knee = wedge for guard recovery\n\nKnee in armpit = wedge for omoplata or shoulder control\n\nFoot on hip = wedge for distance and framing\n\nShoulder under chin = wedge for passing or neck control\n\n🧠 Strategic Use:\nBottom Game: Wedges buy space and time\n\nTop Game: Wedges isolate limbs, elevate hips, and dismantle defense\n\nTransitions: Wedges control tempo—insert to slow them, remove to accelerate you\n\n🔁 Principle:\nGrappling without wedges is pushing a door with no hinge.\nInsert wedge → load structure → rotate or collapse opponent.\n\nSummary:\nWedges are grappling’s invisible levers. They convert pressure into posture breaks, space into control, and friction into force.","cat":"Grappling Primitives","x":0.34,"y":0.24},{"id":"BJJ-085","concept":"Joint Above","desc":"To apply breaking pressure to a joint, you must immobilize or control the joint above it in the kinetic chain. This prevents your opponent from moving their body in a way that dissipates force, rotates out, or structurally relieves the pressure.\n\nIf a joint under attack is free to move proximally (upstream in the chain), the pressure disperses rather than focuses.\n\nControlling the proximal joint anchors the limb in place, forcing the targeted joint to bear the full load of the submission.\n\nHeel hook attacks the knee ligaments from the ankle, and requires hip control.\n\nArmbar attacks the elbow joint, but without shoulder control they can rotate and adjust the angle to relieve pressure and escape.\n\nKimura attacks the shoulder girdle, but unless you control the ribcage/spine they can rotate out.\n\nStraight ankle lock raises their knee naturally, unless its held in place.","cat":"Grappling Primitives","x":0.04,"y":0.11},{"id":"BJJ-086","concept":"Back-Heeling","desc":"retracting your heel backward into your own body to generate clamping pressure.  Hamstrings for knee flexion.  Tension and rotational torque.\n\narmbars; back-heel is a primary control of the torso/shoulder, to get your hips closer to their center of mass.\n\nleglocks; back-heel above their knee to lock it into place.\n\ntriangle, body triangle, leg clamps; back-heeling is everywhere.\n\ncommon mistake; extend or relax the legs too much, this can open space and reduce pressure.","cat":"Grappling Primitives","x":0.13,"y":0.5},{"id":"BJJ-087","concept":"Guard Allure","desc":"“Do not be seduced by the allure of the guard”\n Chris Haueter\n\nit's so easy to get comfortable in guard that you forgot how important it is to stay on top.","cat":"Training","x":0.61,"y":0.19},{"id":"BJJ-043-dup-1","concept":"Technical Focus","desc":"Favor technical proficiency over winning **in training.  In competition it's arguably ok to cut corners and let your inner grit take over (to some extent, not worth it to rip tendons and risk lifelong injury over a medal).  But in training it's pointless to seek victory, you should seek precise control and technique mastery.","cat":"Training","x":0.76,"y":0.69},{"id":"BJJ-088","concept":"Sponge","desc":"Soak up all the information.  Take notes.  Switch your brain on, make connections yourself between the disparate lessons and nuggets of wisdom.  Take ownership of your training.  especially in the early years of training, you should accumulate hundreds of ideas and concepts and techniques, then as \"your belt darkens\" you start to sieve through and keep what works best for you, refine.\nYou can't refine something you don't have.","cat":"Training","x":0.8,"y":0.77},{"id":"BJJ-052-dup-1","concept":"so strong!","desc":"e.g. \"your technique sucks and your just power through everything bro\"","cat":"Memes","x":0.35,"y":0.3},{"id":"BJJ-089","concept":"Negate Grips","desc":"Sometimes a grip needs to be broken, often you can simply render it useless.\n\ne.g., they grab you sleeve, but you use that hand to grab their knee or their belt, suddenly they don't quite have the control they expected anymore.\n\nturning their grips into wristlocks opportunities is another option.","cat":"Tactics","x":0.03,"y":0.02},{"id":"BJJ-089-dup-1","concept":"Explore > Exploit","desc":"Prioritize growth over dominance in a particular training session.\n\nDrop the A-Game to work on new aspects.  Garry Tonon says that he gets tapped all the time in training, because he's working on new stuff.\n\nThere's an optimization algorithm called the multi-armed bandit, if you set it to 80-20, 80% of the time you'll go for the highest payoff strategy (so far!), and 20% of the time you'll explore a new strategy, hopefully discovering an even higher payoff once in a while.\n\nIn training BJJ, you can set that to 50-50 or even 20-80.  Experiment.\n\nLet go of the A-Game\nLet go of the Must-Dominate ego.\n\nRely on your A-Game only when it matters.\n\nsee \"Catch & Release\" too.","cat":"Training","x":0.59,"y":0.98},{"id":"BJJ-090","concept":"Catch & Release","desc":"When there's an obvious experience discrepancy, you get close to lock-in a submission (the “catch”) to the point where you know you could have gotten it (don't lie to yourself either), then let go without finishing (the “release”).\n\n- You to practice control and precision\n\n- They learn and keep rolling without constant resets\n\n- A more flow-based, educational sparring experience\n\nIt’s a sign of control, trust, and teaching mindset, not a missed opportunity to assert dominance on a noob.","cat":"Training","x":0.97,"y":0.05},{"id":"BJJ-092","concept":"Communicate well","desc":"","cat":"Coaching","x":0.71,"y":0.73},{"id":"BJJ-093","concept":"Different learning patterns","desc":"","cat":"Coaching","x":0.69,"y":0.73},{"id":"BJJ-094","concept":"Cut your nails","desc":"Scratchy scratch training partner no good.\ndangerous, unhygienic, may lead to divorces.\n\nYeah, toenails too.","cat":"Do's & Don'ts","x":0.8,"y":0.88},{"id":"BJJ-095","concept":"Clean Feet","desc":"Wash your feet at least a little bit before you offer someone a toe-hold.   Full shower, body wipes, some water a towel, some disinfecting alcohol... something.","cat":"White Belt Tips","x":0.14,"y":0.85},{"id":"BJJ-096","concept":"Accept the Firehose","desc":"You'll be drinking from a firehose at first, even an empty cup will fill up fast, information overload... it's ok.  Just retain what you can and file the rest away somewhere in the recess of your brain.  Enjoy the constant discoveries.","cat":"White Belt Tips","x":0.94,"y":0.84},{"id":"BJJ-097","concept":"Jewelry off","desc":"Best case nothing happens, but let's list the potential negatives; earring or piercing get ripped and you get hurt, you scratch a training partner to blood, your jewelry gets broken and you lose it, your ring fingers gets so swollen that you can't take your ring off anymore, and you need medical help to cut the ring (happened to me! painful... soap, dental floss, nothing worked... doctor actually refered me to firefighters to deal with it, and they had a special tiny saw for rings.)","cat":"White Belt Tips","x":0.1,"y":0.93},{"id":"BJJ-098","concept":"Transparent Pricing","desc":"Free Trial, drop-in fee for beginner? no drop-in for black belts? be transparent on the website, it makes it easier to people to drop by and potentially join.","cat":"Coaching","x":0.88,"y":0.2},{"id":"BJJ-099","concept":"Remember names","desc":"it's hard when there are loads of students, and that one reason why I like Japan where it's common for blue-belts to start embroidering their names on their belts.\n\nHumans appreciate when they're acknowledged.\nStudents and athletes are hopefully a bit more than just paying customers.","cat":"Coaching","x":0.89,"y":0.8},{"id":"BJJ-100","concept":"Identify misconceptions","desc":"If a student is not getting something, reflect on what other building block they might be missing that they're not getting this.","cat":"Coaching","x":0.75,"y":0.26},{"id":"BJJ-101","concept":"Invisible Jiu Jitsu","desc":"Rickson Gracie, Henry Akins... Miyamoto Musashi before them.\n\"第六に、あらゆることについて、ものごとの本質を見分ける力を養うこと。\n第七に、目に見えぬ本質をさとること。\"\n6. In everything, develop the ability to see the essence.\n7. Become aware of the essence the eyes cannot see.\n\nit's mostly weight distribution and proprioception shutting down even attempts at adjusting.\n\nyeah, it's micro-adjusments.\n\nmicro-adjustements done by a white belt : Bullshit\nmicro-adjustments done by a legend : invisible jiu jitsu magic","cat":"Internal","x":0.28,"y":0.68},{"id":"BJJ-102","concept":"Distance Management","desc":"You can neither let them get away nor invade your space.  Especially crucial if striking is involved.\n\nThe tools to prevent them coming in are frames and protecting the inside space.\nThe tools to prevent them from retreating too much are hooks, clamps, entanglements, russian-tie, grips, etc.","cat":"Grappling Primitives","x":0.22,"y":0.5},{"id":"BJJ-103","concept":"1/32 Connection","desc":"Establishing a connection with the opponent is how we ensure that our movements affects their center of gravity and balance and ability to recover.\n\nMy take on it is that you can;\ngrab someone and have no connection.\ngrab some cloth (gi) and have some connection if there's cloth-tension.\n\nhaving an keeping connection requires some level of training and proprioception awareness.\n\nit is most obviously achieved through the bones, either very obvious connection like hip-bone to hip-bone in a mount escape scenario, or more subtle, like grabbing a wrist and creating enough tension that it allows you to manipulate their shoulder or more.\n","cat":"32 Principles","x":0.5,"y":0.5},{"id":"BJJ-104","concept":"3/32 Distance","desc":"see distance management","cat":"32 Principles","x":0.33,"y":0.5},{"id":"BJJ-105","concept":"Breathing","desc":"Physiological control, panic, oxygenation and exhaustion, out of breath as a key indicator for the opponent, faking fatigue or calmness... so many elements to breath.\n\nManage panic during escapes\nOptimize frames under pressure\nConserve energy\nTime explosing movements\nMask fatigue\nCreate deception","cat":"Internal","x":0.5,"y":0.99},{"id":"BJJ-106","concept":"Cursing Cursor","desc":"vibe coding is not for the faint of heart; #AngerManagement","cat":"Internal","x":0.61,"y":0.71},{"id":"BJJ-107","concept":"4-Steps-System","desc":"1. takedown (takes away explosive kinetic energy)\n2. pass the dangerous legs\n3. hierarchy of pins (rated on their ability to harm an opponent on the ground with strikes)\n4. submission\n\n\"beautiful, elegant, and deadly effective\"\n                            - John Danaher\n\nwhere do leg locks fit?","cat":"Strategy","x":0.89,"y":0.83},{"id":"BJJ-108","concept":"Fluid Momentum","desc":"\"Fluid Momentum, leading to positions, then submissions\"\nAnother model, 3 steps.  Similar to Flow-Pressure-Finish.\nDefinitely a very valid way to explain how it's supposed to unfold at high levels.  Also Karel loves to train in water, fluid ^^\n","cat":"Strategy","x":0.81,"y":0.68},{"id":"BJJ-109","concept":"Flow-Pressure-Finish","desc":"Antother Triadic Model, Flow–Pressure–Finish model is with the Ribeiro Ryuuha.\n\n\nFlow:\nMovement without resistance; maintaining balance and adapting to the opponent.  Emphasis on staying mobile and relaxed, especially early in exchanges. Supple.\n\nPressure:\nOnce the opportunity arises, apply pressure to control and fatigue the opponent.  This includes top pressure, positional dominance, and even psychological pressure.\n\nFinish:\nAfter pressure breaks down resistance, go for the submission cleanly and decisively.  Ideally the submission is not forced but the result of the first two phases being executed correctly.\n\n\nMeasured, technical, and composed. Rather than forcing submissions, they emphasize structure, timing, and progressive dominance. You \"flow\" to find openings, apply \"pressure\" to trap your opponent, then \"finish\" once resistance is nullified and they have no more options.\n","cat":"Strategy","x":0.81,"y":0.79},{"id":"BJJ-110","concept":"Kuzushi-Tsukuri-Kake","desc":"We hear a lot of people talk about Kuzushi (often mispronunced Kazushi like Sakuraba's firt name, lol)\n\nNot enough focus is on the either side of the equation according to Kano, i.e. Kuzushi disrupts the other, Tsukuri is about building yourself.\n\nThat is fucking deep.\nI'm obsesses with this idea.\n\nto be even more precise and a total nerd about this, Kano Jigoro wrote that Tsukuri (building) is made of two parts:\n(Kuzushi) disrupting the opponent + Jibun wo Tsukuru (building yourself) = Tsukuri (Set-Up)\n\nonce the set-up is accomplished, you are in strong position to generate force, they are compromised, then a technique can be executed (kake).\n\nsource: Kodokan judo website, 30 years in Japan.\n\n\n---https://www.kuzushi.xyz/2019/10/31/kuzushi-tsukuri-kake-the-doctrine-and-purpose-of-judo/\n\nThe doctrine and purpose of Judo.\n\n崩し Kuzushi comes from the verb 崩す (Kuzusu) meaning…many things : destroy, tear down, pull apart, sit at ease, lose one’s balance, write in cursive style, break a big bill in small bills, get sick.\n\n作る Tsukuru can mean : Make, build, produce, establish, set-up, found, form, write, compose, etc.\n\n掛ける Kakeru also has multipel uses, most relevant ones here would be : start (an engine), turn (a switch on), put ( a burden) on someone, catch (a fish in a net, a bear in a trap)\n\n「崩し」imbalance (the opponent) | Break | Disrupt\n\n「作り」set-up (your own body) | Set | Prepare\n\n「掛け」perform (the technique) | Do | Execute\n\n技の原理\n\n「身体と精神を最も有効に働かせる」、これが柔道の根本原理で、この原理を技の上に生かしたのが「作り」と「掛け」の理論となります。\n\n「作り」は、相手の体を不安定にする「くずし」と、自分の体が技を施すのに最も良い位置と姿勢をとる「自分を作る」ことから成り立っています。 「掛け」は、この作られた一瞬に最後の決め手を施すことをいいます。\n\nこの「作り」と「掛け」は、柔道の根本原理に従った技術原理ということができます。\n\n互いに、精力善用・自他共栄の根本原理に即した作りと掛けを競い合う間に、自然とこの根本原理を理解し、体得して、社会百般の実生活に生かそうとしています。\n\n「技から道に入る」わけです。\n\nThe principle of Waza\n\n(www.kuzushi.xyz translation)\n\nThe “optimal use of body and mind” is a foundational principle of Judo, which comes to life through the theories of Tsukuri (set-up) and Kake (performing the technique).\n\nTsukuri is made of both breaking the balance of the other (Kuzushi) and setting up one’s own body with the best position and posture (Jibun wo  tsukuru – Building oneself).\n\nKake (perform) is what we call the culmination of that one instant which we set-up.   \n\nWe can call Tsukuri and Kake the technical principles that follow the basic principles of Judo.\n\nBreak (the other), Set (oneself), Catch (in our trap)\n\nBreak (the other), Set (oneself), do (the technique)\n\nBreak (the other), Set (oneself), execute\n\nTherefore I propose these mnemonics :\nbreak – set – catch\n\n[break~set] – do\n\n[set~break] – execute\n\n(the order of the first two is interchangeable)\n\nThere are three ways, traditionally, of making kuzushi happen:\n\ndirect action (e.g. pulling or pushing while entering for a throw);\n\ninducing opponent’s action (e.g. a feint or combination attack);\n\ndirect action by opponent (e.g. a counter throw).\n\nBy Jelaludo\n\n\n","cat":"Strategy","x":0.96,"y":0.68},{"id":"BJJ-111","concept":"Positional Dominance","desc":"\"Position before submission\"\n\nA generic model of what to prioritize.  Limited but still useful.\n\nCaveats; high-level competitions have plenty of examples of explosive submissions coming out of nowhere fast.","cat":"Strategy","x":0.72,"y":0.6},{"id":"BJJ-112","concept":"Micro-Adjustments","desc":"a white belt on reddit talked about winning a round by doing \"micro-adjustments\", and it was seen as cringe and boasting and vague.    Yet doing micro-adjustments is entirely legit, small rotation of the shoulder girdle, slight weight shift, forearm angle change as they try to collapse your frames, \"micro adjustments2 *are everywhere.  It just felt funny to the m̶i̶n̶d̶h̶i̶v̶e̶c community because it came from mere white belt.  Boastful? sure, but cut him some slack ^^","cat":"Memes","x":0.3,"y":0.2},{"id":"BJJ-113","concept":"Two Inches","desc":"\"A black belt only covers two inches of your ass. You have to cover the rest.\"  Royce Gracie","cat":"Black Belt Wisdom","x":0.77,"y":0.65},{"id":"BJJ-114","concept":"You will be hunted","desc":"Coloured Belt younger folks will hunt your like you were a video game achievement: \"Tapped my first black belt!\".  And it is ok.\n\n\"A purple belt is a mini-black\", parts of their game might be sharper than yours.","cat":"Black Belt Wisdom","x":0.61,"y":0.55},{"id":"BJJ-115","concept":"Uncomfortable Deference","desc":"In some places you get uncomfortable deference for being a black belt, lining up in a special spot, people asking you for authorization to get on the mats.  Every gym is a bit different.  Don't let it get to your head.","cat":"Black Belt Wisdom","x":0.59,"y":0.26},{"id":"BJJ-116","concept":"Keep Learning.","desc":"Advice for each belt : \nWhite : Relax\nBlue : Relax\nPurple : Relax\nBrown : Relax\nBlack : Keep Learning\n-- Jocko?\n\nnot a bad model ^^\nkeep learning, it never stops!","cat":"Black Belt Wisdom","x":0.67,"y":0.75},{"id":"BJJ-117","concept":"Noob Spaz","desc":"Uncontrolled danger, the worst kind.\n\nExplodes, flails, muscles through everything, refuses to tap... *sigh*","cat":"Player Types","x":0.11,"y":0.14},{"id":"BJJ-118","concept":"Chill Veteran","desc":"been there, done that.  Ok to tap, playful, just want to keep moving and learning new fancy spinning shit, even if it is not the highest-percentage meta.","cat":"Player Types","x":0.94,"y":0.81},{"id":"BJJ-119","concept":"White/Blue Belt IG influencer","desc":"more in it for the vibes? still chill, all good.","cat":"Player Types","x":0.13,"y":0.72},{"id":"BJJ-120","concept":"Unmoved in Mind","desc":"\"[...] learn to be unmoved in mind even in the heat of battle.\"\n   Miyamoto Musashi\n\nand a competition is not even a real battle... ^^\n\nEveryone has some nerves before a competition, I'd reckon.  Some elevated heartbeat, some anticipation.\n\nLet's learn to calm the anxious mind, breathe, face competition as just another hard training round.\n","cat":"Competition","x":0.79,"y":0.71},{"id":"BJJ-121","concept":"Private Lessons w/Champions","desc":"$200 to $500+/h\n\nGreat if you can afford it.  Some Champions make for fantastic coaches (they adapt their teachings to you) others not so much (they'll just teach their same go-to to everyone).","cat":"Resources","x":0.77,"y":0.99},{"id":"BJJ-122","concept":"@craighutchisonjj","desc":"Great IG follow.  Concise and valuable tips.","cat":"Resources","x":0.04,"y":0.06},{"id":"BJJ-123","concept":"BJJ Fanatics","desc":"  Danaher                     (hours) \n1. System : Back Attack\t\t8 \n2. System : Leglock\t\t10\n3. System : Kimura\t\t10\n4. System : Front Headlock\t10\n5. System : Triangle\t\t10\n6. System : Armbar\t\t11.5\n\nHours upon hours of instructionals.\n\nthe \"correct\" way to consumer such long instructionals is to watch until you get some insight, or something specific to work you >> go physically do it.\n\nonce you've reasonably figured out this new piece, keep watching.\n\nnow, you could say that the 11.5 hours of Armbar instructions by Danaher could be distilled into 2, possibly.   it remains that there are hundreds of hours worth of material to be seen on BJJ Fanatics.\n\n\n","cat":"Resources","x":0.99,"y":0.71},{"id":"BJJ-124","concept":"BeltChecker.com","desc":"a cool community, an open-source alternative to the IBJJF.  Register, join the discussions, find new people to visit when traveling worldwide.  Linked with the Globetrotters.\nbjjglobetrotters.com","cat":"Resources","x":0.38,"y":0.21},{"id":"BJJ-125","concept":"bjjglobetrotters.com","desc":"www.bjjglobetrotters.com/bjjcamps\n\ndays or weeklongs camps in beautiful venues.\nHundreds to thousands of $\n\nlooks like so much fun.  One day I shall make the time.","cat":"Resources","x":0.99,"y":0.87},{"id":"BJJ-126","concept":"YT @BJJGlobetrotters","desc":"a great YouTube Channel with dozens of videos from @BJJGBlobetrotters camps, typically 40m  (20m to 1h+) \n\nsome gems in there.","cat":"Resources","x":0.99,"y":0.11},{"id":"BJJ-127","concept":"r/bjj","desc":"a bjj community... 866k members (Summer 2025)\nsome great discussions, some silly memes.","cat":"Resources","x":0.24,"y":0.03},{"id":"BJJ-128","concept":"Passing Definition","desc":"Occupying the space between the knee and the armpit.  Regardless of the dozens of passes, they all accomplish some version of doing this; you started with their legs or hands as obstacles between you and the space between their knees/hip and armpit.\n\nIf you've passed the knee but they're still framing with their hands, you haven't really passed.\n\nIf you do some fancy reverse de la worm grip and you've reached the stage where you got above their knee, you've lowkey already passed, essentially. (\"Omae no Gaado ha mou shinderu\")","cat":"Grappling Primitives","x":0.35,"y":0.5},{"id":"BJJ-129","concept":"Suffocating Comfort","desc":"You're chilling, they're dying.\n\nThe idea is to maintain a relaxed, energy-efficient position while forcing our opponent into a state of escalating discomfort and desperation. Rather than chasing submissions or transitions aggressively, the focus is on creating a biomechanical and psychological trap: the opponent feels pressure mounting, breathing restricted, and escape options dwindling.   All while the controlling grappler expends minimal effort. \n\nThis can occur from dominant pins, Dagestani Cuffs, tight bodylocks, spine-twists; any slow-cooking positional advantage. The essence of Suffocating Comfort is that asymmetry where one person suffers and scrambles, while the other remains calm, heavy, and opportunistic, waiting for fatigue or panic to create the opening.\n\n\nDead Weight.\n\"Make sure they're always uncomfortable\"\nPain maximization.\nRelaxed torture; your leisure is their torment.","cat":"Strategy","x":0.23,"y":0.19},{"id":"BJJ-130","concept":"Young Competition Beast","desc":"Something to prove.  Great and always ready to show it off, accumulating trophies, be it literal cheap ones from the IBJJF, or figurative ones like tapping the slightly out-of-shape hobbyist browns and blacks.","cat":"Player Types","x":0.9,"y":0.16},{"id":"BJJ-131","concept":"Dominant Champion","desc":"So good they don't really need to be aggro.  Gordon Ryan's competition style stands out in this way.","cat":"Player Types","x":0.99,"y":0.96},{"id":"BJJ-132","concept":"Thenar Muscles","desc":"They're the fat pads at the base of the thumb and the base of the little finger.  Crucial to control the hand.\n\nuse the opponent's Thenar and Hypothenar eminences as control point and levers for wristlocks, use your own for grips and chin-straps.\n\nAn awareness of those muscles allows more precise control in grips, with mechanical advantage and reduction in tension to fatigue more slowly.","cat":"Anatomy Awareness","x":0.58,"y":0.61},{"id":"BJJ-133","concept":"Elbow Point","desc":"The bony tip of the elbow serves as a powerful wedge when inserted into tight spaces, such as under an armpit, against a hip, or into a neck fold. Its sharp structure allows for high pressure with minimal effort, creating space or immobilizing a limb when used in framing.\n\nOne direct use of the elbow point is to break an attempt to prevent the Kimura by holding one's belt.","cat":"Anatomy Awareness","x":0.72,"y":0.34},{"id":"BJJ-134","concept":"Tibia","desc":"The Shin-Bone.\n\nFor knee-slices, knee-on-belly, leg-ride, shin-on-shin.\n\nThe ridge of the shin acts as a slicing or grinding tool When driven across the opponent’s body, it is sharp and creates discomfort and disrupts alignment.\n\nAlso key to angle it properly for calf-slicers.","cat":"Anatomy Awareness","x":0.67,"y":0.27},{"id":"BJJ-135","concept":"Ulna","desc":"Ulna and Radius.  The forearm bones.\n\nUse it to frame, or to drive your weight into the soft tissue of the neck.\n\nSlice it into their biceps as your elbow controls theirs.\n\n","cat":"Anatomy Awareness","x":0.81,"y":0.25},{"id":"BJJ-136","concept":"Heel","desc":"Heel as an anchor and pressure tool.  Set-it close to their hips to reduce movement, or in their neck or ribs, back heel, hook.\n\nJust bringing attention to the idea that whereas its obvious you have heels, start to recognize it as an active tool.","cat":"Anatomy Awareness","x":0.64,"y":0.3},{"id":"BJJ-137","concept":"Inion","desc":"I knew that one in Japanese first 後頭部隆起 (literal : Back of the head protuberance), had to look it up.\n\nIt's the best spot to control someone's head, and helpfully there's a little protuberance that allows for some slight hooking.\n\n","cat":"Anatomy Awareness","x":0.62,"y":0.15},{"id":"BJJ-138","concept":"Glute Dominance","desc":"The Glutes are the engine of bridging, and having strong glutes is key to protecting one's knees.\n\nFeel what's activating when you move.","cat":"Anatomy Awareness","x":0.8,"y":0.76},{"id":"BJJ-139","concept":"Lats","desc":"The latissimus dorsi forms a powerful link between your arms and core. I mainly focus on that when doing armpit grips a la Silver Fox.\n\nWhether you're dragging, collar-tying, or maintaining a clamp, lats stabilize the shoulder girdle and transmit force efficiently. Lat connection ensures pulling doesn’t rely only on biceps or grip, but the full body chain.","cat":"Anatomy Awareness","x":0.92,"y":0.85},{"id":"BJJ-140","concept":"Sternum Stacking","desc":"aligning the head and chest over the hips to maintain structure, prevent folding, and generate clean pressure during pins or passes.","cat":"Anatomy Awareness","x":0.21,"y":0.18},{"id":"BJJ-141","concept":"Scapular Glide","desc":"The scapulae must move smoothly over the rib cage to allow functional arm movement without compromising posture. Grapplers benefit from controlled scapular positioning,i.e. retracting, protracting, depressing as needed to maintain frames, deliver pressure, relieve pressure, rotate out of an armbar attempt, etc. \n\nLose Scapula = lack of connection","cat":"Anatomy Awareness","x":0.35,"y":0.3},{"id":"BJJ-142","concept":"Pelvic Tilt","desc":"The sacrum's orientation can be 1) tucking (posterior tilt) or 2) arching (anterior tilt).\n\nThis influences pelvic posture and spinal mechanics. A neutral or slightly posterior tilt stabilizes the core, reinforces base in guard, and supports safe spinal stacking. Awareness of sacral tilt is foundational for resisting sweeps or generating hip motion.\n\nThere's a \"trick\" in close guard whereby engaging the pelvis can mostly negate attempts to break you forward with strong harmstring leg pulls.","cat":"Anatomy Awareness","x":0.2,"y":0.3},{"id":"BJJ-143","concept":"Psoas","desc":"The psoas connects the spine to the femur and plays a vital role in hip flexion and core stability.   It is the only (?) muscle connecting upper and lower body.\n\nSubtle but powerful, conscious psoas engagement improves posture, it can anchor the hips and spine together.\n\n","cat":"Anatomy Awareness","x":0.35,"y":0.74},{"id":"BJJ-144","concept":"Diaphragm Breathing","desc":"Diaphragmatic breathing shifts the work of respiration from the chest to the core, promoting relaxation, endurance, and internal pressure control. In grappling, it enables you to feel more bottom-weighted, anchored, engaging your core.\n\nA key component of calm, efficient movement under pressure.","cat":"Anatomy Awareness","x":0.27,"y":0.7},{"id":"BJJ-145","concept":"#1/21 Persistence","desc":"it's part of the \"7 P's\"... hard to model on this axis ^^","cat":"21 Immutable Principles","x":0.85,"y":0.7},{"id":"BJJ-146","concept":"Arrhichion of Phigalia","desc":"OG Badass no-gi grappler.  Αρριχίων ο Φιγαλεύς) (died 564 BC) was a champion pankratiast in the ancient Olympic Games.\n\nHe died while successfully defending his championship in the pankration at the 54th Olympiad (564 BC). Arrhichion has been described as \"the most famous of all pankratiasts\".","cat":"Noteworthy Grapplers","x":0.95,"y":0.95},{"id":"BJJ-147","concept":"Roger Gracie","desc":"Old School GOAT","cat":"Noteworthy Grapplers","x":0.97,"y":0.05},{"id":"BJJ-148","concept":"Problem-Solving Itch","desc":"There's an element of puzzle-solving in BJJ that scratches a cognitive itch.  Every opponent is slightly different, either in build, experience or intensity.  Each with a  unique set of reactions, habits, and structural patterns. Training becomes a lively back-and-forth, your strategies are built, tested, broken, and refined. It's the joy of figuring things out, over and over again. ","cat":"Why Do We Train?","x":0.77,"y":0.83},{"id":"BJJ-149","concept":"Coaching Fullfilment","desc":"Teaching someone grateful to learn is an extremely rewarding human interaction.   Teaching can be more rewarding than winning. Watching someone get light-bulbs moments, seeing confidence and competence bloom, techniques sharpening, etc. can be a profound source of satisfaction. Coaching others also deepens your own understanding, as you need to grok everything more deeply.","cat":"Why Do We Train?","x":0.91,"y":0.15},{"id":"BJJ-150","concept":"Fitness","desc":"we have to do *something*! to stay active.  might as well also have all those other benefits.","cat":"Why Do We Train?","x":0.93,"y":0.65},{"id":"BJJ-151","concept":"Self-Defense","desc":"Everything has limitations, many martial arts claim to be \"the best\" for self-defense.  There's a case to be made that striking arts can be better at self-defense via offense, e.g. knocking out someone cold.  That comes with a host of other potential legal issues.\n\nThe ability to protect your space, get up if taken down, hopefully some awareness of rolling while avoiding punches, etc. can be beneficial if a situation ever gets hands on.  \n\nCeteris Paribus, other things being equal.\nMultiple Attackers, Weapons, Drug-crazed maniacs, Syringes full of HIV and broken glass on the ground, there are of course limits to what Jocko Willink called a \"super power\" and \"the 2nd best tool for self-defense\" (concealed carry #1).\n\nStill, any blue belt should be able to handle someone untrained with a good amount of control.\n\nI certainly prefer that my nieces know how to strangle someone with their legs effectively rather than being totally defenseless.\n\nHaving self-defense has a goal is not paranoia.  Some cities are safer than others (Tokyo, Singapore), none are entirely free of personal danger.  Being prepared just in case while having fun training is not a bad idea.","cat":"Why Do We Train?","x":0.89,"y":0.81},{"id":"BJJ-152","concept":"Existential","desc":"Training can give a sense of identity, a sense of lifelong pursuit. \n\nMiyamoto Musashi and others spoke of \"the path\", a way of life shaped not just by what we do, but by how we do it ? or that walking the path itself is more important than the destination.  Grappling can become more than a hobby; it becomes an obsession, something that reflects your values, evolves with you, allows you to meet others on a similar path, from wildly different backgrounds, yet kindred spirits. It's not (just) about winning or mastering others, but it can be about walking a path of refinement, humility (in the face of injuries, or those stronger than us), and deep engagement with the self, overcoming lack of motivation, tapping into the discipline to push forward. For those driven by this existential motivation, quitting can feel like abandoning a part of who they are, perhaps more so than other hobbies ?","cat":"Why Do We Train?","x":0.97,"y":0.88},{"id":"BJJ-153","concept":"Self-Mastery","desc":"You definitely learn about yourself under pressure.  You learn to handle various types of people and your own emotions, be it in the day-to-day struggle to get better, or when entering competition and the clash of egos and skills.","cat":"Why Do We Train?","x":0.87,"y":0.89},{"id":"BJJ-154","concept":"Curisosity & Exploration","desc":"Some people, perhaps especially older black belts, perhaps train simply because they're curious. What happens if I try this grip? Can I solve that escape? Grappling becomes a sandbox for experimentation,an endless field of biomechanical and strategic possibilities, you constantly think of your body in three dimensions and how it entertwines with that of the opponent.\n\nNot every skill or move we learn has to be the absolute best and most effective meta.","cat":"Why Do We Train?","x":0.78,"y":0.65},{"id":"BJJ-155","concept":"Tribe & Belonging","desc":"The need for belonging is 3rd in Maslow's pyramid (well, 4th if you consider Wifi access before physiological needs).\n\nOnce you join a grappling tribe, you know that wherever you travel you'll meet fellow members of that crazy tribe.  I'm sure it's true of Golfers and Bridge Players too.  For many, training fills a social gap: friendship, camaraderie, mutual struggle. You first show up for the techniques, then stay for the people.","cat":"Why Do We Train?","x":0.37,"y":0.87},{"id":"BJJ-156","concept":"Recognition","desc":"Achievements, recognition from your peers. \n\nBelts, medals, praise, social status perhaps.  These matter to some. Not always in a shallow way either, but as a way to mark progress. Grappling provides structure, milestones, and the validation of a hard-earned nod from those you respect.","cat":"Why Do We Train?","x":0.28,"y":0.73},{"id":"BJJ-157","concept":"Therapy","desc":"Some show up because it’s the only place they can breathe and forget about the world.  You don't think about that work presentation that went wrong or a problem in your couple while Joe is trying to strangle you. Grappling grounds you in the moment, offers an outlet for stress, grief, or restless thoughts. Being on the mats becomes a kinetic meditation.  \n\nr/bjj will always recommend that you do not *substitute true therapy with BJJ, it's not a panacea :)","cat":"Why Do We Train?","x":0.68,"y":0.86},{"id":"BJJ-158","concept":"Shared Practice & Bonding","desc":"Whether it’s parent-child, a couple, siblings or lifelong friends, grappling becomes a shared language. Training together builds trust like few other things can, there's something about the body-to-body, moment-to-moment, about the shared struggles, about growing better together.\n\nI've trained with my son since he was 10 or 11, now he's a young adult, and rolling with him is still in the top 3 most fullfilling things in life.  I hope one day I get to roll with my grand-children.\n\nEspecially in a world where increasingly everything is done through a screen, there's something...primal... primitive... about grappling with our closed ones.\n\nSo many other animals do it too! All the big cats, bears, wolves and dogs, primates... they all play-fight, even elephants and horses and meerkats and otters and... ^^","cat":"Why Do We Train?","x":0.76,"y":0.22},{"id":"BJJ-159","concept":"Routine & Structure","desc":"2x, 3x, 5x a week.  It becomes part of the rhytm of your life, it gives a reason to get up early, or a place to go after work (and excuse to refuse drinks with colleagues), it can become part of a more balanced and healthy life.","cat":"Why Do We Train?","x":0.59,"y":0.61},{"id":"BJJ-160","concept":"Career","desc":"Building toward pro athlete status or coaching roles.  There's not much money to be made, yet, but the sports is growing.","cat":"Why Do We Train?","x":0.1,"y":0.9},{"id":"BJJ-161","concept":"Competition as Entertainment","desc":"If it becomes professional fighting, with money on the line, you're not just doing it to win the fight anymore, it must also be entertaining for the audience.   The locus shifts.","cat":"Why Do We Train?","x":0.39,"y":0.37},{"id":"BJJ-162","concept":"Social Media Identity","desc":"Making content as a public persona, whether it’s as a coach or athlete, or lifestyle brand, or thirst trap.  It's meant to be consumed by others.","cat":"Why Do We Train?","x":0.32,"y":0.23},{"id":"BJJ-163","concept":"External Pressure","desc":"Maybe it's in the family, or your parents really think you should... Like the Williams Sisters from Tennis.  Not the most stable of motivations, but it can happen.","cat":"Why Do We Train?","x":0.22,"y":0.3},{"id":"BJJ-164","concept":"Wash your gear","desc":"Your Gi, your rashguard and shorts.  Just come in clean.   It's polite and a health hazard not to do.","cat":"Do's & Don'ts","x":0.87,"y":0.8},{"id":"BJJ-165","concept":"Tap Early, Tap Often","desc":"The interesting part of learning happened before you got stuck that deep into a submission that is not threatening your with injuries.\n\nThere absolutely *exists a place for training late escapes, but that is absolutely not as a beginner, and not during every roll, and only with training partners you trust and who've mastered the art to apply submissions in a fully controlled manner.","cat":"Do's & Don'ts","x":0.78,"y":0.72},{"id":"BJJ-166","concept":"Ask Questions","desc":"when confused, just ask questions","cat":"Do's & Don'ts","x":0.76,"y":0.3},{"id":"BJJ-167","concept":"Show up Consistently","desc":"it's difficult to progress meaningfully without consistency.","cat":"Do's & Don'ts","x":0.75,"y":0.82},{"id":"BJJ-168","concept":"Roll Ligh when asked","desc":"it might take a while for you to be able to modulate.  What you think is your 20% might be perceived as 80%.  But it's crucial to adapt to the other's intensity.","cat":"Do's & Don'ts","x":0.62,"y":0.42},{"id":"BJJ-169","concept":"it's ok to say \"no\"","desc":"It's ok to refuse a roll for fear of injury/bad vibes/tired. \nHopefully it's not all the time with everyone, but our guts are more often right than wrong.","cat":"Do's & Don'ts","x":0.59,"y":0.63},{"id":"BJJ-170","concept":"Train both sides","desc":"not for everything, but it helps.  It can also be disorienting for some have a good knee-slice on the side they're not used to defend.","cat":"Do's & Don'ts","x":0.84,"y":0.26},{"id":"BJJ-171","concept":"Brush your teeth","desc":"","cat":"Do's & Don'ts","x":0.94,"y":0.11},{"id":"BJJ-172","concept":"Laugh when smashed","desc":"We want to foster a good training environment that leads to everyone growing their skills.  The ability to actually laugh and compliment your opponent when getting smashed is maybe surprinsingly important.  It takes care of your ego, opens up your mind to figuring out what happened, rather than being salty it did.","cat":"Do's & Don'ts","x":0.95,"y":0.23},{"id":"BJJ-173","concept":"Learn their names","desc":"Teammates, coaches, students... it's important in human interactions to remember names.  “Remember that a person’s name is to that person, the sweetest and most important sound in any language” --Dale Carnegie","cat":"Do's & Don'ts","x":0.91,"y":0.34},{"id":"BJJ-174","concept":"Eye gouge","desc":"Not in training.  Sure in a life-or-death situation why not?  but if you can gouge their eyes, they can gouge yours in retaliation too.    It's not a get-out-of-jail-free card.\n\nBiting...\nFishhooking...\nsame","cat":"Do's & Don'ts","x":0.11,"y":0.87},{"id":"BJJ-175","concept":"No Striking","desc":"Punches, kicks, elbows, knees, headbutts.  Grappling training is neither MMA nor Lethwei nor a vale tudo street fight.\n\nIt's important to set-aside some time for at least the awareness that someone might use these tools, and therefoe have a sense of control to prevent them.  But it's not something we can train full on without getting hurt.","cat":"Do's & Don'ts","x":0.08,"y":0.89},{"id":"BJJ-176","concept":"Bending Digits","desc":"Bending individual fingers is a big no-no in training. \n\nIf you can twist and break a partner's fingers, surely they can retaliate by twisting and breaking one of yours.  Finger for Finger and the whole world has broken hands.\n\nyou can grab the palm.\ngrabbing four fingers is ok to break a grip.\nthe IBJJF rule is \"three or more fingers\" is generally ok to grab.","cat":"Do's & Don'ts","x":0.2,"y":0.79},{"id":"BJJ-177","concept":"Crank submissions","desc":"Don't.  it's poor sportsmanship, it's bad control.\nif you can't get a submission slowly, you haven't fully mastered it.\n\nDon't be like the infamous Paul Harris, who iirc actually got kicked out of the UFC for repeatedly holding submissions until after the ref called it.","cat":"Do's & Don'ts","x":0.31,"y":0.83},{"id":"BJJ-178","concept":"Respect the Tap","desc":"They tap, you stop.  No : \"it wasn't fully on!\", \"come on that twister wasn't even finished!\", etc.\n\nIf they tap you let go.  We're not inside our opponent's head or bodies, we don't fully know their injuries.\n\nrespect the tap, always.\n\nVerbal, hand, double-tap, foot, all of the above. respect the tap.","cat":"Do's & Don'ts","x":0.99,"y":0.96},{"id":"BJJ-179","concept":"Ignore your injuries","desc":"Recovery time is crucial for longevity.","cat":"Do's & Don'ts","x":0.46,"y":0.88},{"id":"BJJ-180","concept":"Weaponize your sweat","desc":"it's gross.  don't.  We're primitives and savages, not monsters.","cat":"Do's & Don'ts","x":0.19,"y":0.19},{"id":"BJJ-181","concept":"Sandbag tournaments","desc":"why... go up to blue belt or purple belt already.\n\n\"winning without peril, one triumphs without glory\"","cat":"Do's & Don'ts","x":0.44,"y":0.4},{"id":"BJJ-182","concept":"Make Creepy Comments","desc":"Don't make creepy comments to anyone, ever.   Don't sexualize the girls and women who had the courage to step on the mats.\n\nKeep your banger crude jokes for another audience.","cat":"Do's & Don'ts","x":0.05,"y":0.94},{"id":"BJJ-183","concept":"offer zero resistance","desc":"during drills or sparring, it's a waste of time for your partner if there's just floppiness.","cat":"Do's & Don'ts","x":0.41,"y":0.12},{"id":"BJJ-184","concept":"Unforce Errors","desc":"Unforced Errors in Tennis. Blunder in Chess.\n\nSometimes it pays to be reactive rather than proactive. \nTo let them make mistakes that you can exploit.\n\nYou set it up either through bait, frustration, or a dilemma.\n\nSay you're in a strong base, 50/50 standing as you're both in a position to go for an Osotogari outside leg sweep, if you moving first means compromising your stance, which they could use, sometimes it's best to wait for them to commit and react.\n\nIt helps to know the handful of potential most likely outcome from a given position.\n\nDon't interrupt an opponent making a mistake.\n\nThis is not a hard and fast rule, don't wait *all the time ffs.\n\nsometimes it makes sense.","cat":"Tactics","x":0.87,"y":0.15},{"id":"BJJ-185","concept":"Grip θ Decay","desc":"Act fast once you have a dominant grip.\n\n\"Grips Don't Getter With Time\" is how I first remember hearing it from Marcelo Garcia.\n\nNo Grip is Eternal.\n\nOpponents start to fight against them, probe the weaknesses, change angles forcing re-gripping.\n\nDon't miss the window of opportunity.\n","cat":"Tactics","x":0.22,"y":0.19},{"id":"BJJ-186","concept":"Match Head Height","desc":"This comes from wrestling and matching level changes, yet applicable in BJJ when passing an opponent on the floor too.  If you don't, you leave your legs accessible for all sorts of wrestling up.","cat":"Tactics","x":0.48,"y":0.45},{"id":"BJJ-187","concept":"Chill Garage Bros","desc":"Couple of enthusiasts watching instagram and teaching themselves while smoking weed","cat":"Dojos/Clubs Types","x":0.25,"y":0.25},{"id":"BJJ-188","concept":"Scam Cults","desc":"False advertising, cultish tendencies, nickel and diming students with extra fees for everything, forbidding students to cross-train, little or no live-rolling.  \"Our techniques are too dangerous to train live\".","cat":"Dojos/Clubs Types","x":0.98,"y":0.03},{"id":"BJJ-189","concept":"Professional Hobbyist Gym","desc":"Professional & Ethical.  Run as a business because coach has to pay the bills and keeps the lights on the showers running.  \n\nCatering to hobbyists rather than pro-athletes.\n\nNo abusive monetization (obscure pricing, forcing purchase of club gis, paying for grades, etc.)","cat":"Dojos/Clubs Types","x":0.5,"y":0.5},{"id":"BJJ-190","concept":"Professional Competitive Gym","desc":"Run as a business and for good reasons; full of pro-athletes, trying to churn competitive players to go out and win prize money.\n\nGood Facilities, Clean Showers, Strict Time Slots.\n\nmedium to high training intensity on the regular, turned up to 11 for folks doing training camps.\n\nMuch harder than your typical hobbyist training regimen.","cat":"Dojos/Clubs Types","x":0.8,"y":0.75},{"id":"BJJ-191","concept":"Hardcore Porrada Competition","desc":"Survival of the Fittest and PEDs + we'll milk you on private lessons were upper belts just beat you up lol because that's how we learned.  \n\nGrit > Flow\nHeart > Techniques\n\nMedals for the Glory of the Team!","cat":"Dojos/Clubs Types","x":0.75,"y":0.9},{"id":"BJJ-192","concept":"Mc Dojos","desc":"Mc Dojos exist on a spectrum, we can imagine the key dimensions of a training environment, and that McDojos are deficient in most of them.  Not necessarily scams, just lacking.\n\nAnd obsessed with decorum and rank usually : BOW TO YOUR SENSEI!\n\nmeh.\n\nMaybe we can think of it in terms of Aristotle's Golden Mean.\nCourage is great, but too much and you have recklessness, too little and it's cowardice.\ngenerosity, wastefulness, stinginess\nambition, sloth, greed\nhumor, boringness, absurdity\ncomposure, irritabgility, apathy\netc.\n\n\nChallenging training:\nExcess: Recklessly unsafe, aggressive\nDeficiency: Unrealistic samurai roleplay\n\n\nPhysical conditioning:\nExcess: Overtraining, leading to burnout or injury\nDeficiency: Insufficient conditioning, resulting in limited progress\n\n\nTechnical instruction:\nExcess: Overemphasis on complex techniques, neglecting fundamentals\nDeficiency: Oversimplification of techniques, limiting effectiveness\n\n\nSparring intensity:\nExcess: Full-contact sparring without proper safety measures or supervision\nDeficiency: Limited or no contact sparring, preventing the development of practical skills\n\n\nTeaching methodology:\nExcess: Rigid, dogmatic instruction, stifling creativity and growth\nDeficiency: Unstructured, laissez-faire teaching, resulting in confusion and lack of direction\n\n\nRespect and discipline:\nExcess: Authoritarian, overly strict environment, discouraging open communication\nDeficiency: Disorganized, chaotic atmosphere, lacking in respect for tradition and hierarchy\n\n\nFocus on tradition and history:\nExcess: Overemphasis on historical aspects, neglecting practical application\nDeficiency: Ignoring cultural context, reducing martial arts to mere physical activity\n\nInclusivity and community:\nExcess: Overemphasis on group dynamics, neglecting individual needs and development\nDeficiency: Excessive focus on individual competition, undermining the sense of community and support\n\nBalancing self-defense and personal development:\nExcess: Sole focus on self-defense techniques, ignoring character growth and discipline\nDeficiency: Overemphasis on personal development, neglecting practical self-defense skills\n\nCompetition and performance:\nExcess: Overemphasis on winning tournaments, fostering a win-at-all-costs mentality\nDeficiency: Disregarding the value of competition, missing opportunities for growth and skill development","cat":"Dojos/Clubs Types","x":0.75,"y":0.25},{"id":"BJJ-193","concept":"Hardcore Meatheads","desc":"Dirty Warehouse, fuck money, let's SMESH BRO!\n\nMight include training on concrete with broken glass, syringes and weapons for realism, because they're just Alpha like that.","cat":"Dojos/Clubs Types","x":0.2,"y":0.9},{"id":"BJJ-194","concept":"OODA Loop","desc":"OODA Loop: Observe, Orient, Decide, Act.\n\nIt’s a decision making model from fighter pilot John Boyd. You constantly cycle through those steps faster than your opponent to stay ahead.\n\nIn grappling, it’s basically what we're trying to do every roll:\n\nObserve: Where are their hands? Weight? Hips?\n\nOrient: Based on their game, intent, and your game, what are your options?\n\nDecide: Pick the next sequence.\n\nAct: Go for it.\n\nThe trick is: if you loop faster than your partner, you’re two steps ahead while they’re still figuring things out.\n\nFast OODA = dominate the pace. \nSlow OODA = get smeshed.\n\n\"win battles they don't know they're fighting\"","cat":"Tactics","x":0.78,"y":0.7},{"id":"BJJ-195","concept":"Standing-Clinch-Ground","desc":"Another 3 step model.\nChris Haueter, Rickson Gracie.\n\nhighlights the importance of the clinch, especially as a means to control punches and kicks and avoid eating strikes while taking it to the ground.","cat":"Strategy","x":0.72,"y":0.74},{"id":"BJJ-196","concept":"Penetrative Step","desc":"From wrestling.  \n\nIt's about closing the distance and getting deep into enemy territory, not just reaching with your arms but crowding their space with your body, stepping through them with intent and base.\n\nIn judo it might an aspect of Tsukuri for some hip throws, deep step.\n\nIt’s not enough to \"reach\", you must enter with intent, putting your whole structure into the throw or takedown. \n\nShallow step leads to half-hearted shot or throw.\nDeep penetrative step leads to their CoG being disrupted.\n","cat":"Grappling Primitives","x":0.45,"y":0.54},{"id":"BJJ-197","concept":"Hidden Jiu Jitsu","desc":"https://www.hiddenjiujitsu.com/\n\nThough I love the content that Henry Akins puts out, this website is a masterclass in online sleaze tactics.\n\nObfuscation of the price\nhyperbole promises (Unstoppable, heavy like a whale, Black-Belt-In-A-Box)\nConstant appeal to authority (Rickson Magic)\nOver the top illustrations and thumbnails\nHidden! Secrets! just for you the low price of XX.99$!!!\netc.\n\n\n\nI'd love to check it out\nhaven't been able to push myself to pull the trigger yet.\n","cat":"Resources","x":0.75,"y":0.7},{"id":"BJJ-198","concept":"test 222 b","desc":"","cat":"Resources","x":0.26,"y":0.78},{"id":"BJJ-199","concept":"test 223 b","desc":"","cat":"Resources","x":0.24,"y":0.82},{"id":"BJJ-200","concept":"Overlapping Pressure","desc":"Never let go of one point of pressure/compression before moving on.\n\ne.g. press on their right shoulder with your left hand (passing scenario) while twisting their right knee in the opposite direction with your right hand, creating an uncomfortable twister-like diagonal control.   Both hands are busy, but you need at least your right hand to progress, so you bring in your right knee to replace your right hand (landing a \"leg ride\" type control), and freeing your right to do something else.\n\ne.g.2.\ncontrolling a triangle entry from bottom, you're holding your shin with you hand to prevent them from posturing up, bring in the other leg to close the triangle while your hand is still holding the shin, then use your know redundant hand for someting else.\n\nnever* give back whatever space you took. \n\n*well, of course not \"never\", just a helpful heuristic.","cat":"Grappling Primitives","x":0.44,"y":0.31},{"id":"BJJ-201","concept":"Active Denial","desc":"Deny whatever tool they currently need to either escape or threaten you.","cat":"Grappling Primitives","x":0.49,"y":0.09},{"id":"BJJ-203","concept":"Base","desc":"Base and Base of Support are related but slightly different.\n\nBase as \"Resistance to linear displacement\" might be a good physics framing.\n\nIn grappling having \"base\" is a qualitative term referring to someone's ability to maintain posture, resist being moved, and apply force effectively.\n\nIt cncludes BoS but also posture, weight distribution, and muscular tension.\n\n“Good base” = hard to sweep, hard to move, stable but dynamic.\n\nOften trained/felt more than defined.\n\nCoach: “Widen your base!”, “Find your base before attacking!”\n\nLess concerned with the shape of contact points, more with functional resistance under stress.","cat":"Physics of Grappling","x":0.2,"y":0.2},{"id":"BJJ-204","concept":"Friction","desc":"Feet, hands, hips, cloth (gi), ground, etc. preventing slipping.  Or sweat increasing it.","cat":"Physics of Grappling","x":0.32,"y":0.26},{"id":"BJJ-205","concept":"Leverage","desc":"Classical force through limbs","cat":"Physics of Grappling","x":0.33,"y":0.13},{"id":"BJJ-206","concept":"Torque","desc":"https://youtu.be/ghQTSVv0j2o?si=_EZ-83YYyEL0_xgO\n\nRotational force","cat":"Physics of Grappling","x":0.4,"y":0.71},{"id":"BJJ-207","concept":"Shear","desc":"Parallel oppossing forces","cat":"Physics of Grappling","x":0.35,"y":0.77},{"id":"BJJ-208","concept":"Axial Load","desc":"","cat":"Physics of Grappling","x":0.34,"y":0.65},{"id":"BJJ-209","concept":"Centripetal/Centrifugal","desc":"","cat":"Physics of Grappling","x":0.9,"y":0.77},{"id":"BJJ-210","concept":"Redirection","desc":"","cat":"Physics of Grappling","x":0.82,"y":0.67},{"id":"BJJ-211","concept":"Acceleration","desc":"","cat":"Physics of Grappling","x":0.82,"y":0.15},{"id":"BJJ-212","concept":"Impulse","desc":"Force x Time","cat":"Physics of Grappling","x":0.79,"y":0.21},{"id":"BJJ-213","concept":"Momentum","desc":"p = mv","cat":"Physics of Grappling","x":0.87,"y":0.28},{"id":"BJJ-214","concept":"Proximity = Stability","desc":"Your limbs are handles for the opponent.\n\nThe more you extend those handles, the longer of a lever you provide the opponent with.\n\n\"Elbows in\"\n\nStability increases as your limbs remain close to your center of gravity. Extended limbs act as levers for your opponent and weaken your base.\n\n“The closer the limbs, the stronger the structure.”\n\nTurtling with elbows tight = strong defense (in a grappling scenario without soccer kicks)\n\nPosting too far = easy arm drag\n\nFraming too long = underhook bait\n\nPosting wide on top = sweep bait\n\nIn open guard butterly, Marcelo recommends to never have your feet extended further away from your hands.\n\nThe more compact you are, the harder it is to penetrate your defenses.\n\n#Distal Control\n\n","cat":"Tactics","x":0.33,"y":0.68},{"id":"BJJ-215","concept":"Base of Support (BoS)","desc":"In sports science, the Base of Support (BoS) refers to the area beneath a person that includes every point of contact with the supporting surface. A wider BOS generally equates to greater stability, while a smaller one BOS leads to increased mobility, or vulnerability to falling.\n\nJudo throws and sweeps can be visualized as bring the opponent's CoG outside of their BoS.\n\nCenter of Gravity\nBase of Support\n\nKuzushi brings their CoG to the tipping point\nKake (execution) makes it flip over.\n\nCrouching, widening stance, retracting limbs; all these influence the BoS.\n\nI've seen advanced studies of Rugby/American Football with the BoS concept being used for tackles and mobility to avoid tackles.","cat":"Physics of Grappling","x":0.12,"y":0.11},{"id":"BJJ-216","concept":"CoG","desc":"Center of Gravity.\n\nthe theoretical point where a person’s mass is evenly distributed in all directions. \n\nIn sports science it is used for balance, movement, and power generation. A stable athlete keeps their CoG aligned over their base of support; a dynamic one learns how to shift it with control, say to throw a ball or javelin.\n\nIn Judo, CoG is the invisible point around which every battle of balance is fought. Throws should NOT be powered by brute strength, they should feel effortless and a result of having displaced the opponent's CoG outside their base, causing them to fall.\n\nMaster your own CoG, feel and manipulate your opponent's.\n\nThere are really cool Judo sports science visualizations of this.\n\nHunting for a link...\nhttps://youtu.be/SX0gzfXNWqo\nJUDO TECHNIQUES: Base of support / Center of gravity explained","cat":"Anatomy Awareness","x":0.34,"y":0.14},{"id":"BJJ-217","concept":"Active Meditation","desc":"Most of us have trouble counting 10 breaths without being distracted.   Sparring offers a relatively safe environment that requires a lot of focus when facing someone of equal or higher skills.  It requires all our focus to stay alive.  Some see this as a form of forced active meditation, where for the duration of training none of life's problems matter, only escaping this armbar, or surviving the RNC, or finally getting rid of this dangerous lapel grip.","cat":"Why Do We Train?","x":0.72,"y":0.72},{"id":"BJJ-218","concept":"Create Dilemmas","desc":"Create positions where all choices are undesirable for the opponent.\n\n(etymology, greek, \"double proposition\")\n\nMount : Cross-collar Choke <> Armbar\nBack : RNC / Armbar / Rear Triangle, etc.\nGuard : Triangle/Armbar/Omoplata\nSide : Mouse trap (Americana/Straight/Kimura)\n\nCollar Tie + Wrist Control : disengage >> shoot, fight >> snapdown\n\nPressure : Stay and Suffer, or Escape and Expose\n\nUchimata > ankle pick/snap down/ko uchi\n\n\nChaining Attacks is the mechanism\nDilemma is the effect, they know you can chain something.\n\nMaybe chaining is the engine that produces dilemmas.\n\nyou can chain and try to overwhelm their ability to solve everything, or chain in a way that brings a Check Mate situation.\n\nChaining attacks is perhaps more about keeping momentum\n\nDilemma is a more of a controlled impossible choice.\n","cat":"Tactics","x":0.41,"y":0.17},{"id":"BJJ-219","concept":"Weight Cut","desc":"Plan early to cut weight, starts weeks out, don't aim for an unrealistic weight class.\n\nReduce your intake but don't remove anything entirely.  Don't shock your system too much.\n\nMake sure that you're hydrated on the day of the competition.\n\nDangers of Bad Weight Cuts:\nDehydration : kidney damage, fainting, impaired cognition, reduced reaction time, reduced endurance\n\ncramping, dizziness, overheating\n\nfasting reducing gut function and lowering immune defense\n\nmental fatigue, irritability, mood swings\n\nmuscle loss\n\nmaking weight at the expense of power and health might not be worth it.\n\nIf you don't feel sharp on the day, you did something wrong.\n\navoid panic cuts.","cat":"Competition","x":0.12,"y":0.86},{"id":"BJJ-220","concept":"Gi Check","desc":"at IBJJF competition these can be insanely frustrating, being rejected for the smallest of perceived non-adherence to their ridiculous set of totally arbitrary rules.\n\nbut to tell you how I really feel, it is fucking insane that for AMATEUR matches they'd reject ANYONE who pays a $100 fee to come compete for a $5 medal.\n\nif your jiu jitsu cannot handle someone's gi that is too thick/thin/frayed/blue/green/yellow/short, etc.  your jiu jitsu is not effective.\n\nanyway.\nbring two sets of everything, be there with friends so you can borrow their gear\n\neven belts they give you shit for...\n\nfml","cat":"Competition","x":0.42,"y":0.58},{"id":"BJJ-221","concept":"Shu 守破離","desc":"守破離 Protect/Break/Walk Away\nShu Ha Ri is a Japanese concept of mastery found in several arts.\n\nThe main idea is to first replicate what the master tells you.  He's dedicated his life to it, he knows his shit, just follow it.\n\nAs you get better, you realize that some rules can be broken ?! (Never* show your back? naah... Never! cross your ankles in back control?! wel...)\n\nAs time goes you discover your own patterns, your own insights, and you can walk your own path.","cat":"Learning Methods","x":0.1,"y":0.1},{"id":"BJJ-222","concept":"Test Category","desc":"testing if LRTB works correctly","cat":"Test Category","x":0.7,"y":0.41},{"id":"BJJ-223","concept":"Sergeant Drills","desc":"DROP DOWN AND GIVE ME 20 SHRIMPS! ONE-TWO! ONE-TWO!\nFRONT ROLLS GO!GO!GO!\n\nThere's a place for cardio, there's a place for basics.  I do not consider this type of training to be the most conducive to skill acquisition.","cat":"Learning Methods","x":0.25,"y":0.23},{"id":"BJJ-224","concept":"Prescribed Sequence","desc":"10x armbar / triangle combo from closed guard\n10x hip bump to kimura\n10x failed triangle to y-grip in armpit recovery\n\nthese have a place in the early stages to seed the idea of chaining moves","cat":"Learning Methods","x":0.36,"y":0.31},{"id":"BJJ-225","concept":"One-Size-Fits-All Warmup","desc":"Everybody should know their own body and how they get warmed up and get the juices going best.   I encourage people to find moves that work for them and their current body type and ailments and goals.  We can share moves we like, but expecting everyone to warm up the same feels off.  We are not the same.","cat":"Learning Methods","x":0.45,"y":0.4},{"id":"BJJ-226","concept":"Constraint-led coaching","desc":"Coach sets the scenarios, but doesn't micromanage.\n\nThat's the essence of the ecological approach.  Athletes learn by solving problems in realistic, variable game-like situations, guided by constraints instead of explicit step-by-step instruction.\n\nRediscovering a principle by yourself makes it easier to ingrain, as opposed to being spoon-fed it.\n\nself-discovery under realistic constraints builds deeper retention and adaptability than receiving the answer, but maybe not being confident that you can implement it.\n","cat":"Learning Methods","x":0.94,"y":0.06},{"id":"BJJ-227","concept":"Ecological w/Feedback","desc":"In pure ecological, you'd set constraints and let students struggle towards the answers.\n\nThere are nuances to this, and I'm sure even the most extreme proponents of ecological do give feedback sometime.\n\nApostates, heretics.","cat":"Learning Methods","x":0.78,"y":0.15},{"id":"BJJ-228","concept":"Position Sparring","desc":"Start in HQ, do a knee slice.  How? choice is yours.  Resisting opponent.\n\nReset.\n\nhow is that fundamentally different from Ecological? while still being a drill...?\n\nI suppose it's in how tightly you script the solution.\nMaybe forcing a knee-slice is not open enough, a back step or floating might be more appropriate.\n\nA pure Constraint-Led could start in HQ, but you'd set a constraint (bottom player only frames, does not grab), and see what solutions emerge.\n\nPosition sparring = constrained situation\nConstraint-led = constrained affordances, emergent solutions.","cat":"Learning Methods","x":0.64,"y":0.26},{"id":"BJJ-229","concept":"Fix biggest leak","desc":"As a general rule, reflect on your biggest leaks from previous sessions, and work on fixing these.","cat":"Learning Methods","x":0.1,"y":0.89},{"id":"BJJ-230","concept":"Focused solo experimentation","desc":"This month I'm doing Guillotines, or Kimura, or RDLR because I watched a cool Jason Rau series, or Buggy Choke because it's the fun fad of 2022, etc.","cat":"Learning Methods","x":0.44,"y":0.77},{"id":"BJJ-231","concept":"Deep Dive","desc":"Select one skill you're working one, find good partners, explore every aspects of it.  Ask the partner to give you specific looks (grab my shin, don't let me pass the knee, etc.)\n\nTroubleshoot under duress.\n\nDeep dives are great\nusually require a great training partner.","cat":"Learning Methods","x":0.24,"y":0.75},{"id":"BJJ-232","concept":"Watch own footage","desc":"Reflect on how you roll from footage and memory, tune out the ego and see what works and does not.","cat":"Learning Methods","x":0.93,"y":0.87},{"id":"BJJ-233","concept":"Copy famout athletes","desc":"Find somehow of similar build that moves the way you'd like to move, try to imitate the essence of how they do their magic.","cat":"Learning Methods","x":0.85,"y":0.79},{"id":"BJJ-234","concept":"Flow Roll to Test","desc":"Drop your A-Game while exploring position, do catch & release if you have the skills-differential in your favor, put yourself in bad positions to test your frames and escapes","cat":"Learning Methods","x":0.73,"y":0.73},{"id":"BJJ-235","concept":"Self-imposed challenges","desc":"e.g. a coach had a phase during which he rolled without grabbing anything, you can force it by holding a tennis ball.\n\nNever submit a white belt twice with the same submission.\n\nAlways start in a bad position.\n\nUse only your non-dominant side.\n\nPass Guard without the hands\n\nEyes closed (makes some partners uncomfortable, discuss before hand)\n\nGauntlet, fresh opponents every round.","cat":"Learning Methods","x":0.76,"y":0.84},{"id":"BJJ-236","concept":"Stay Connected","desc":"Once you've established a connection with your opponent, don't let it go while you transition.\n\nPut your weight on them.\nDrive into them.\nStep on them rather than on the floor.\nPost on them.\nControl levers to their hips and shoulders.\n\n折角 you have a connection you can use, don't give it up for no reason.","cat":"Grappling Primitives","x":0.14,"y":0.29},{"id":"BJJ-237","concept":"Kinetic Chess","desc":"Somehow likening Grappling to Chess can inflame passions and tribal rivalries.\n\nThe best argumenst for detractors are probably that 1) it is not *uniquely so, i.e. Rugby or Ping Pong could be said to have similarities to Chess as well.  And 2) that grappling is not turn-based.\n\nYet I offer for you consideration these principles from a man born in 1888, José Raúl Capablanca and his five principles for winning:\n\n1) Activate Everything, start with your least active pieces\n2) Keep everything connected, nothing hanging\n3) Always Ask : \"What does my opponent want?\"\n4) Attack pawns\n5) Endgames are won by passed pawns\n\nI'd replace pawns by joints and keep the rest.\n\nAnother gem by Capablanca : \"I see only one move ahead, but always the best move\".\n\nYou don't need to be 20 steps ahead in grappling, but constantly perceiving and denying what the opponent wants will make it feel like you are.\n","cat":"Memes","x":0.79,"y":0.9},{"id":"BJJ-238","concept":"Initiate Movement","desc":"Sometimes it can pay off to initiate a movement that looks like a mistake they want to capitalize on, but be ready with the full force of your strong posture and back-up plans.\n\ne.g. They want you to post your hand from closed guard so they can get a Kimura from bottom?  shift your weight, post your hand and make it heavy and straight, watch them open up elsewhere are they go for something that is not here.\n\n(Disclaimer : This can go either way, sometimes from a neutral position it is better to let *them make the first move.  Nothing is 100% of the time here.  Heuristics, Ideas, models which are wrong yet sometimes useful blablabla)\n\n","cat":"Tactics","x":0.23,"y":0.66},{"id":"BJJ-239","concept":"Affordances","desc":"Affordance comes from design theory (Gibson/Norman) and describes the action possibilities that an object, surface, or situation “offers” to an agent. \n\nIn product design, a door handle affords pulling, a flat plate affords pushing, a knob affords twisting, a switch affords flicking.\n\nCrucially, it’s about what an observer sees as possible (perceived affordance), not just the theoretical possibilities.\n\nI see it as another concept for \"visual triggers\".\n\nOpen armpit : affords a underhook\nFlared elbow : Kimura\nExtended leg while on bottom, knee slice or back-step to saddle.\nWeight shift back : ankle pick, single leg\n\n\nit's not just what is physically possible, it's what your trained perception spots immediately as a viable action.\n\nI'm on the bottom and spot a space in their armpit? shoulder crunch.\n\netc.\n\ntrain to multiply your affordances.\n\nOther terms for similar ideas, more or less pompous : \n- triggers\n- invitations\n- cues\n- handles\n- Window of opportunities\n- openings\n- ","cat":"Grappling Primitives","x":0.77,"y":0.63},{"id":"BJJ-240","concept":"Axis Awareness","desc":"Similar to Pivot.\n\nAny rotation of the body around a fixed point (foot, knee, hip, hand, elbow) to escape of reorient your angle of attack without giving up base.\n\nThe pivot changes the relationship between your CoG and the opponent, creating new problems.\n\nTurn, Rotation, Axis Shift, Reorientation, Angular Adjustment.\n\nThe key is to distribute weight so the axis is stable during the rotation.\n\nArm Drag, Rolling Back Take, Back-Step.\n\nit's everywhere.","cat":"Grappling Primitives","x":0.4,"y":0.7},{"id":"BJJ-241","concept":"Hands Connection","desc":"Maintaining continuous physical contact between your own hands (gripping your own wrist, palm-to-palm, finger lock, gable grip, S-grip, Neil 3-finger grip etc.) to create a closed kinetic chain. \n\nThis 100% reinforces structural strength, you can transmit core strength more effectively, and it stabilizes your control.\n\nSelf-grip, closed-chain grip, interlocking grip, hand clasp, \"Apes Together Strong\".\n\nThe benefits are numerous; Force Multiplication, structural integrity, control, leverage creation, it protects one limb from being isolated.\n\nPITFALS do exist; you're reducing your range of motion and giving a strong anchor or handle to your opponent.   You can have grip fatigue if you merely use it to resist rather than position yourself better.  It's an obvious commitment to a position, it gives the opponent fewer things to concentrate on.","cat":"Grappling Primitives","x":0.09,"y":0.5},{"id":"BJJ-242","concept":"Submission Requirements","desc":"Each Submission has a checklist of what it requires to be effective.\n\nIsolating an arm\nPressing on the carotids\nEstablishing a lever\netc.\n\nit's zero-sum game.\n\nYou need to be aware of the requirements so you can both apply them for your own submissions, and deny them to escape their.\n\nmental checklist\nvisual cues\nperceptual cues\n\nyou need to know if it's \"ON\" or not.\ndo I have a \"bite\" on this sub or not?\n\nPilot and checklist for flying.\nGrappler and mental checklist for subs. requirements","cat":"Grappling Primitives","x":0.77,"y":0.75},{"id":"BJJ-243","concept":"Train for Da Streetz","desc":"None of that modern Jiu Jitsu Bullshit, we train for mortal kombat.\n\nThere's a grain of truth in there, it is interesting for sure for have some awareness of where punches and kicks could come from (if anything, the opponent being in a good enough posture to throw punches and kicks means his posture is not compromised, which is not a good sign)\n\nBut if that becomes the entire persona, it can be a tired look : WE do the real stuff, THEY do bullshit.\n\n\"None of that competition crap! they don't even know I could punch/eye gouge them...\"  yeah. I like the idea that BJJ is ALSO helpful for self-defense, but it can be offputting if the badassery is overdone.","cat":"Memes","x":0.45,"y":0.56},{"id":"BJJ-244","concept":"Blue Belt Blues","desc":"White Belt Spaz\nBlue Belt Blues\nPurple Belt Skips warm-ups\nBrown Belt gets fat (from not having to try hard anymore)\nBlack Belt dates the new girl\n\nStereotypes often have some bits of validity behind.\n\n","cat":"Memes","x":0.46,"y":0.34},{"id":"BJJ-245","concept":"2nd Best Self-Defense","desc":"\"BJJ is the 2nd best for self defense, the 1st is Concealed Carry\" -- Jockko\n\nThere's an interesting discussion to be had about \"Self-Defense\" vs \"Most Effective to Knock Out on the concrete\"\n\nBoxing, Muay Thai, Letwhei, etc. would probably do a better job than BJJ at quickly knocking down a threat, brain damage and all, in a few seconds.\n\nGrappling requires a bit of set-up and control, but there's the case that it's precisely these elements that help protect the attacker that make it good \"self-defense\", in a non-life-or-death situation perhaps.\n\nif you're in a warzone, get weapons.","cat":"Memes","x":0.86,"y":0.96},{"id":"BJJ-246","concept":"Match vs Fight","desc":"Is double pull guard to advantage really a \"fight\"? more of a match though, right?\n\nbut Palhares vs Tonon, that felt more fighty\n\nit's a spectrum, and not just the autism.","cat":"Memes","x":0.75,"y":0.24},{"id":"BJJ-247","concept":"95% of Fights go to the Ground","desc":"80%, 90%, 95%, 99% ?\n\n\"31% of the time it works 96% of the time\"\n\nApparently the initial claim comes from an LAPD study, showing that \"95% of altercations take one of five patterns\".\n\nOf that 95%, 62% ended on the ground.\n(so more like 59%)\n\nIt's also specifically focused on police altercations, and if the goal is to do an arrest... ending up on the ground sounds more likely.\n\nSalt Shaker.\n\n\nOne Ph.D. did a research on hundreds of fight videos and found out that roughly \nhttps://jiujitsu365.wordpress.com/2008/03/11/do-most-fights-go-to-the-ground-research-i-conducted/\n42% of \"street fights\" ended with both on the ground.\n72% with at least one on the ground.\n\n57% were thrown, tripped, pulled\n35% were knocked to the ground\n\n3rd data point : \nHere another video where they say it's 31%, not 90%\nhttps://www.youtube.com/watch?v=BawuxsS2NuE&t=61s\n\nBUT, in that case, the person INITIATING THE TAKEDOWN, won 96% of the time.\n\n\n\n\n\n","cat":"Memes","x":0.1,"y":0.88},{"id":"BJJ-248","concept":"Local Maximum","desc":"In a skills acquisition curve, one grappler might reach a local peak, (higher than some peers who started around the same time), but to reach higher in the next mountain, they might have to go down a notch once before climbing higher.\n\nmaybe they muscle through too much, and that reaches a plateau once they encounter people with the technical levels to deal with it.\n\nUnlearn to learn.\ngo back down, come back up.\n\nmetaphor is roughly that climbing in a fog, you reach a hill that looks like the peak, but when the fog clears you realize that there's a much higher peak in the distance.\n\nit's a math concept, also used in computer science and evolutionary biology, like the Galapagos maybe, where some organisms reached a local peak, but are not quite fit for the wider world.","cat":"Training","x":0.66,"y":0.61},{"id":"BJJ-249","concept":"勢 (Shi)","desc":"\"Dynamic Potential\"\n\"Momentum of a Situation\"\n\"Strategic Configuration of Power\"\n\"Potential Born of Disposition\"\n\"Capitalizing on an advantage\"\n\"Attaining an advantage\"\n\nA more direct and western translation might be a mix of \"play with the cards that are dealt\" and \"Capitalize on your advantage\", but let's just accept that it is slightly ambiguous and broader.\n\nIt is all about leveraging the situational dynamics, rather than trying to rigidly force your will against reality.\n\nIn grappling I believe that giving up a poor position (or one too expensive to capitalize on, too tiring) is often the better move, as you try to stay one-step ahead and get a better \"bite\" on the next opportunity.\n\nA mix of flexibility, adaptability and opportunism.\n\nThe best submission is the one they give you, even if you had to funnel them through to this point.\n\n\n\n\n---\n\"The US Army War College Quarterly: Parameters\"\n[...]\n Shi is the goal of strategy’s objective and subjective aspects: to create \nand attain an advantage over an opponent after evaluating a situation \nand influencing it. Shi can be found in chapters one, five, six, and ten \nof the ancient Chinese military classic, The Art of War. Chapter six notes \nthat “the military is without fixed shi and without lasting form,” imply\ning flexibility in the attainment of a strategic advantage.\n Michael Pillsbury, one of America’s foremost authorities on the \nPLA and author of several comprehensive works on Chinese military \nthought, has uncovered several PLA materials discussing shi. He noted: \n• Shi assesses your side’s potential, the enemy side’s potential, weather, \nand geography to identify the moment in a campaign when an advan\ntage can be gained over an opponent. Shi is a certain moment in the \ncampaign when you could take the advantage from the enemy; \n• Shi is created in five ways, through maneuver, posture, position, psy\nchology, and calculations. The timing and speed of creating shi in war  has changed under conditions of high-tech warfare; \n• Shi is the moment when it becomes apparent one side can win the war ;\n • Shi according to the Tang founder used psycho-shi, geo-shi, and \nshaping-shi; \n• Shi can be created with stratagems.\n\nA number of other Chinese sources discuss the concept. The Chinese \nbook Campaign Stratagems defines shi as the combination of the friendly \nsituation, enemy situation, and the environment; the integrated situation \nthat has an impact on the effective performance of military strength; \nand the sum of all factors impacting the performance of the operational \nefficiency of both sides.\n\nTimothy Thomas, \"China's Concept of Military Strategy,\" Parameters 44, no. 4 (2014), doi:10.55540/\n 0031-1723.2968. \n\nhttps://press.armywarcollege.edu/parameters/vol44/iss4/6/\n\n","cat":"Strategy","x":0.8,"y":0.2},{"id":"BJJ-250","concept":"\"Bite\"","desc":"Literally biting is verboden in competition and probably not that effective in other settings, except perhaps to make your opponent mad and maybe break some teeth.\n\nHaving a \"Bite\" is that initial little feedback that tells you : \"yes, I've got some purchase here, this could cascade into control, pressure, finish\"\n\nWhen a grip, wedge or clamp actually sinks in and stops or limits their movement.\n\nWhen sliding becomes friction and connection.\n\nThe \"Catch\", a lever or frame becomes actionable.\n\nSuddenly they can't retract their eblow at will, you've got a bite.\n\nLeg entanglement above their knee, they can't retract, you got a bite to work with.\n\nBack take; you got a first hook or shoulder and hip control, that's the initial bite, let's solidify.\n\nIn mechanical terms it would be the gear \"catching\" or the brake pads gripping.\n\nIn military strategy perhaps a \"foothold\" or \"beachhead\".  A small piece of ground is secured, and you expand from there.\n","cat":"Grappling Primitives","x":0.2,"y":0.1},{"id":"BJJ-251","concept":"Fail Often","desc":"Fail Often, Fail Early.\n\nAs long as you learn from your mistakes! it is crucial to let yourself fail often and early to get your of your mat time.  \n\nnot every roll has to be a measure of your manhood and battle to the death.\n\nrecognize the mistake that got you in a bad spot, tap, file your questions to ask at the end of class.\n\nFail often so you can multiply your chances of learning.","cat":"Training","x":0.7,"y":0.83},{"id":"BJJ-252","concept":"temp3","desc":"","cat":"Coaching","x":0.6238,"y":1},{"id":"BJJ-253","concept":"temp4","desc":"","cat":"Coaching","x":0.6175,"y":0.9803}];
+
+const CAT_COLORS = {
+  'Grappling Primitives':   '#00d4ff',
+  'Physics of Grappling':   '#00aaff',
+  'Anatomy Awareness':      '#0066ff',
+  'Tactics':                '#ff00cc',
+  'Strategy':               '#dd00ff',
+  '21 Immutable Principles':'#aa00ff',
+  '32 Principles':          '#7700ff',
+  'Training':               '#00ff88',
+  'Coaching':               '#00ff44',
+  'Memes':                  '#00ffcc',
+  "Why Do We Train?":       '#00cc88',
+  "Do's & Don'ts":        '#009966',
+  'Dojos/Clubs Types':      '#006644',
+  'Player Types':           '#44ff44',
+  'Learning Methods':       '#ffaa00',
+  'Black Belt Wisdom':      '#ff8800',
+  'Competition':            '#ff4400',
+  'Internal':               '#ff6688',
+  'Resources':              '#ffcc44',
+  'White Belt Tips':        '#ffff88',
+  'Noteworthy Grapplers':   '#ff22aa',
+  'Test Category':          '#444444',
+};
+
+const GROUPS = [
+  { name:'THE MAT',  kanji:'地', color:'#00d4ff', cats:['Grappling Primitives','Physics of Grappling','Anatomy Awareness','Techniques'] },
+  { name:'THE MIND', kanji:'天', color:'#ff00cc', cats:['Tactics','Strategy','21 Immutable Principles','32 Principles'] },
+  { name:'THE DOJO', kanji:'人', color:'#00ff88', cats:['Training','Coaching','Memes',"Why Do We Train?","Do's & Don'ts",'Dojos/Clubs Types','Player Types'] },
+  { name:'THE PATH', kanji:'道', color:'#ffaa00', cats:['Learning Methods','Black Belt Wisdom','Competition','Internal','Resources','White Belt Tips','Noteworthy Grapplers','Test Category'] },
+];
+
+// ── State ────────────────────────────────────────────────────────────────────
+const HUD_H = 28;
+function TOOLBAR_H(){ return document.getElementById('toolbar').offsetHeight || 36; }
+
+// Responsive canvas font scale: 1.0 on desktop, up to 2.5x on mobile
+function fScale() { return Math.max(1, Math.min(2.5, 900 / window.innerWidth)); }
+
+const canvas = document.getElementById('c');
+const ctx    = canvas.getContext('2d');
+const tip    = document.getElementById('tooltip');
+
+let cam  = { x:0, y:0, z:1 };
+let drag = null;
+let mx=0, my=0; // canvas-relative mouse
+let searchQuery = '';
+let activeCategories = new Set(Object.keys(CAT_COLORS));
+let layoutNodes = [];
+let catBounds   = {}; // name -> {x,y,w,h} in world coords
+let zoomedCat   = null;
+
+// Quadrant label fade tracking
+let quadHover = {}; // name -> { enteredAt: ms, exitedAt: ms }
+GROUPS.forEach(g => { quadHover[g.name] = { enteredAt:0, exitedAt:0 }; });
+
+// ── Treemap ──────────────────────────────────────────────────────────────────
+function treemap(rect, items, weightFn) {
+  if (!items.length) return;
+  if (items.length === 1) { items[0].bounds = {...rect}; return; }
+  const total = items.reduce((s,i)=>s+weightFn(i),0);
+  const half  = total/2;
+  let sum=0, split=1;
+  for (let i=0; i<items.length-1; i++) {
+    sum += weightFn(items[i]);
+    if (sum>=half) { split=i+1; break; }
+  }
+  const a=items.slice(0,split), b=items.slice(split);
+  const ratio=a.reduce((s,i)=>s+weightFn(i),0)/total;
+  let rA,rB;
+  if (rect.w>=rect.h) {
+    rA={x:rect.x,             y:rect.y, w:rect.w*ratio,    h:rect.h};
+    rB={x:rect.x+rect.w*ratio,y:rect.y, w:rect.w*(1-ratio),h:rect.h};
+  } else {
+    rA={x:rect.x, y:rect.y,              w:rect.w, h:rect.h*ratio};
+    rB={x:rect.x, y:rect.y+rect.h*ratio, w:rect.w, h:rect.h*(1-ratio)};
+  }
+  treemap(rA,a,weightFn); treemap(rB,b,weightFn);
+}
+
+// ── Build hierarchy ──────────────────────────────────────────────────────────
+function buildHierarchy(W, H) {
+  const PAD=4;
+  const catMap={};
+  GROUPS.forEach(g => {
+    g.nodes=[];
+    g.catObjects=g.cats.map(name=>{
+      const obj={name,nodes:[],groupColor:g.color};
+      catMap[name]=obj; return obj;
+    });
+  });
+  RAW.forEach(n=>{
+    const co=catMap[n.cat];
+    if (co) co.nodes.push(n);
+    const grp=GROUPS.find(g=>g.cats.includes(n.cat));
+    if (grp) grp.nodes.push(n);
+  });
+  const qW=W/2, qH=H/2;
+  const qR=[
+    {x:0,  y:0,  w:qW,h:qH},
+    {x:qW, y:0,  w:qW,h:qH},
+    {x:0,  y:qH, w:qW,h:qH},
+    {x:qW, y:qH, w:qW,h:qH},
+  ];
+  GROUPS.forEach((g,i)=>{ g.bounds=qR[i]; });
+  GROUPS.forEach(g=>{
+    const inner={x:g.bounds.x+PAD,y:g.bounds.y+PAD,w:g.bounds.w-PAD*2,h:g.bounds.h-PAD*2};
+    const active=g.catObjects.filter(c=>c.nodes.length>0);
+    if (!active.length) return;
+    treemap(inner,active,c=>Math.max(c.nodes.length,1));
+    active.forEach(c=>{
+      c.inner={x:c.bounds.x+PAD,y:c.bounds.y+PAD,w:c.bounds.w-PAD*2,h:c.bounds.h-PAD*2};
+      catBounds[c.name]=c.bounds;
+    });
+  });
+}
+
+// ── Draw helpers ─────────────────────────────────────────────────────────────
+function glow(color,blur){ ctx.shadowColor=color; ctx.shadowBlur=blur; }
+function noGlow(){ ctx.shadowBlur=0; ctx.shadowColor='transparent'; }
+function hexToRgba(hex,a){ const r=parseInt(hex.slice(1,3),16),g=parseInt(hex.slice(3,5),16),b=parseInt(hex.slice(5,7),16); return `rgba(${r},${g},${b},${a})`; }
+
+function drawLabel(text,x,y,color,size,align,gblur){
+  const fs = size * fScale();
+  ctx.save();
+  ctx.font=`${fs}px 'Courier New',monospace`;
+  ctx.textAlign=align||'center'; ctx.textBaseline='middle';
+  ctx.fillStyle=color;
+  if(gblur) glow(color,gblur*fScale());
+  ctx.fillText(text,x,y); noGlow(); ctx.restore();
+}
+
+// World-to-screen
+function w2s(wx, wy) {
+  const W=canvas.width, H=canvas.height;
+  return {
+    sx: (wx + cam.x - W/2) * cam.z + W/2,
+    sy: (wy + cam.y - H/2) * cam.z + H/2,
+  };
+}
+
+// ── Main draw ────────────────────────────────────────────────────────────────
+function draw() {
+  const W=canvas.width, H=canvas.height;
+  const now=Date.now();
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle='#000508'; ctx.fillRect(0,0,W,H);
+
+  if (zoomedCat) {
+    drawZoomed(W, H, now);
+  } else {
+    drawFull(W, H, now);
+  }
+
+  // Scanlines
+  for(let y=0;y<H;y+=3){ ctx.fillStyle='rgba(0,0,0,0.035)'; ctx.fillRect(0,y,W,1); }
+  const vg=ctx.createRadialGradient(W/2,H/2,H*0.3,W/2,H/2,H*0.85);
+  vg.addColorStop(0,'transparent'); vg.addColorStop(1,'rgba(0,0,0,0.4)');
+  ctx.fillStyle=vg; ctx.fillRect(0,0,W,H);
+}
+
+// ── Full view ────────────────────────────────────────────────────────────────
+function drawFull(W, H, now) {
+  ctx.save();
+  ctx.translate(W/2, H/2);
+  ctx.scale(cam.z, cam.z);
+  ctx.translate(-W/2+cam.x, -H/2+cam.y);
+
+  buildHierarchy(W, H);
+  layoutNodes=[];
+
+  // Grid
+  ctx.strokeStyle='rgba(0,180,220,0.05)'; ctx.lineWidth=1;
+  for(let gx=0;gx<W;gx+=40){ ctx.beginPath();ctx.moveTo(gx,0);ctx.lineTo(gx,H);ctx.stroke(); }
+  for(let gy=0;gy<H;gy+=40){ ctx.beginPath();ctx.moveTo(0,gy);ctx.lineTo(W,gy);ctx.stroke(); }
+
+  const q=searchQuery.toLowerCase();
+
+  GROUPS.forEach(g=>{
+    if(!g.bounds) return;
+    const b=g.bounds, gc=g.color;
+
+    ctx.fillStyle=hexToRgba(gc,0.025); ctx.fillRect(b.x,b.y,b.w,b.h);
+
+    glow(gc,18); ctx.strokeStyle=gc; ctx.lineWidth=2;
+    ctx.strokeRect(b.x+1,b.y+1,b.w-2,b.h-2); noGlow();
+
+    // Corner brackets
+    const cs=14; ctx.lineWidth=2; glow(gc,10);
+    [[b.x,b.y],[b.x+b.w,b.y],[b.x,b.y+b.h],[b.x+b.w,b.y+b.h]].forEach(([cx,cy])=>{
+      const sx=cx===b.x?1:-1, sy=cy===b.y?1:-1;
+      ctx.beginPath(); ctx.moveTo(cx+sx*cs,cy); ctx.lineTo(cx,cy); ctx.lineTo(cx,cy+sy*cs); ctx.stroke();
+    }); noGlow();
+
+    // Quadrant label — fade in/out on hover
+    const qh=quadHover[g.name];
+    const FADE_IN=300, HOLD=1500, FADE_OUT=600;
+    let labelAlpha=0;
+    if (qh.enteredAt>0) {
+      const elapsed=now-qh.enteredAt;
+      if (qh.exitedAt>=qh.enteredAt) {
+        // mouse has left
+        const sinceExit=now-qh.exitedAt;
+        const baseAlpha=Math.min(1, elapsed/FADE_IN);
+        labelAlpha=baseAlpha*(1-Math.min(1,sinceExit/FADE_OUT));
+      } else {
+        labelAlpha=Math.min(1, elapsed/FADE_IN);
+      }
+    }
+    if (labelAlpha>0.01) {
+      ctx.globalAlpha=labelAlpha;
+      drawLabel(`${g.name}  ${g.kanji}`, b.x+b.w/2, b.y+b.h/2, gc, 22, 'center', 16);
+      ctx.globalAlpha=1;
+    }
+
+    // Categories
+    const activeCats=(g.catObjects||[]).filter(c=>c.nodes.length>0&&c.bounds);
+    activeCats.forEach(cat=>{
+      if (!activeCategories.has(cat.name)) return;
+      const cb=cat.bounds, ci=cat.inner;
+      const cc=CAT_COLORS[cat.name]||'#888';
+
+      ctx.fillStyle=hexToRgba(cc,0.05); ctx.fillRect(cb.x,cb.y,cb.w,cb.h);
+      glow(cc,6); ctx.strokeStyle=hexToRgba(cc,0.5); ctx.lineWidth=1;
+      ctx.strokeRect(cb.x+0.5,cb.y+0.5,cb.w-1,cb.h-1); noGlow();
+
+      if(cb.h>22&&cb.w>60){
+        const fs=Math.min(9,Math.max(7,cb.w/14));
+        const maxC=Math.floor(cb.w/(fs*0.62));
+        const lbl=cat.name.length>maxC?cat.name.slice(0,maxC-1)+'…':cat.name;
+        drawLabel(lbl,cb.x+cb.w/2,cb.y+9,hexToRgba(cc,0.8),fs,'center',3);
+        if(cb.h>28) drawLabel(`[${cat.nodes.length}]`,cb.x+cb.w/2,cb.y+19,hexToRgba(cc,0.4),7,'center',0);
+      }
+
+      if(!ci) return;
+      cat.nodes.forEach(n=>{
+        const nx=ci.x+n.x*ci.w;
+        const ny=ci.y+(1-n.y)*ci.h;
+        const cc2=CAT_COLORS[n.cat]||'#ffff00';
+
+        let matched=false, dimmed=false;
+        if(q.length>0){
+          matched=n.concept.toLowerCase().includes(q)||n.cat.toLowerCase().includes(q)||n.desc.toLowerCase().includes(q);
+          dimmed=!matched;
+        }
+
+        const r=matched?5:(dimmed?1.5:2.5);
+        const alpha=dimmed?0.15:1;
+        const glowAmt=matched?36:6;
+
+        ctx.globalAlpha=alpha;
+        ctx.beginPath(); ctx.arc(nx,ny,r,0,Math.PI*2);
+        glow(cc2,glowAmt);
+        ctx.fillStyle=matched?'#fff':cc2;
+        ctx.fill(); noGlow();
+        ctx.globalAlpha=1;
+
+        // Edge-aware matched label (use screen coords for edge detection)
+        if(matched){
+          const sc=w2s(nx,ny);
+          const S=fScale();
+          ctx.save();
+          ctx.font=`bold ${9*S}px 'Courier New',monospace`;
+          ctx.textBaseline='bottom';
+          const em=W*0.12;
+          let align='center', lx=nx;
+          if(sc.sx<em){ align='left'; lx=nx+8/cam.z; }
+          else if(sc.sx>W-em){ align='right'; lx=nx-8/cam.z; }
+          ctx.textAlign=align;
+          glow('#fff',8); ctx.fillStyle='#fff';
+          ctx.fillText(n.concept, lx, ny-6/cam.z); noGlow();
+          ctx.restore();
+        }
+
+        layoutNodes.push({node:n, wx:nx, wy:ny, matched, dimmed});
+      });
+    });
+  });
+
+  ctx.restore();
+
+  // Search count
+  if(q.length>0){
+    const n=layoutNodes.filter(l=>l.matched).length;
+    document.getElementById('search-count').textContent=`${n} MATCH${n!==1?'ES':''}`;
+  } else {
+    document.getElementById('search-count').textContent='';
+  }
+}
+
+// ── Zoomed category view ──────────────────────────────────────────────────────
+function drawZoomed(W, H, now) {
+  const S = fScale();
+  const PAD=40;
+  const nodes=RAW.filter(n=>n.cat===zoomedCat&&activeCategories.has(n.cat));
+  const cc=CAT_COLORS[zoomedCat]||'#0ff';
+
+  ctx.fillStyle=hexToRgba(cc,0.03); ctx.fillRect(0,0,W,H);
+  glow(cc,20); ctx.strokeStyle=cc; ctx.lineWidth=2;
+  ctx.strokeRect(2,2,W-4,H-4); noGlow();
+
+  const titleH = Math.max(28, 28*S);
+  ctx.save();
+  ctx.font=`bold ${18*S}px 'Courier New',monospace`;
+  ctx.textAlign='center'; ctx.textBaseline='middle';
+  glow(cc,14); ctx.fillStyle=cc;
+  ctx.fillText(zoomedCat.toUpperCase(), W/2, titleH); noGlow();
+  ctx.font=`${10*S}px 'Courier New',monospace`;
+  ctx.fillStyle=hexToRgba(cc,0.5);
+  ctx.fillText(`[${nodes.length} CONCEPTS]`, W/2, titleH+18*S);
+  ctx.restore();
+
+  const innerX=PAD, innerY=titleH+32*S;
+  const innerW=W-PAD*2, innerH=H-innerY-PAD;
+
+  ctx.strokeStyle=hexToRgba(cc,0.07); ctx.lineWidth=1;
+  for(let gx=innerX;gx<=innerX+innerW;gx+=innerW/8){ ctx.beginPath();ctx.moveTo(gx,innerY);ctx.lineTo(gx,innerY+innerH);ctx.stroke(); }
+  for(let gy=innerY;gy<=innerY+innerH;gy+=innerH/8){ ctx.beginPath();ctx.moveTo(innerX,gy);ctx.lineTo(innerX+innerW,gy);ctx.stroke(); }
+
+  const q=searchQuery.toLowerCase();
+  const LH = 12*S; // label height for collision
+
+  // Compute positions first
+  const positioned = nodes.map(n=>{
+    const nx=innerX+n.x*innerW;
+    const ny=innerY+(1-n.y)*innerH;
+    const matched=q.length>0&&(n.concept.toLowerCase().includes(q)||n.desc.toLowerCase().includes(q));
+    const dimmed=q.length>0&&!matched;
+    return {n, nx, ny, matched, dimmed, lx:nx, ly:ny-10*S};
+  });
+
+  // Collision resolution: simple iterative push (5 passes)
+  for(let pass=0;pass<5;pass++){
+    for(let i=0;i<positioned.length;i++){
+      for(let j=i+1;j<positioned.length;j++){
+        const a=positioned[i], b=positioned[j];
+        const dy=Math.abs(a.ly-b.ly), dx=Math.abs(a.lx-b.lx);
+        const approxW=a.n.concept.length*6.5*S;
+        if(dx<approxW && dy<LH+4){
+          const push=(LH+4-dy)/2+1;
+          a.ly -= push; b.ly += push;
+        }
+      }
+    }
+  }
+
+  positioned.forEach(({n,nx,ny,matched,dimmed,lx,ly})=>{
+    ctx.globalAlpha=dimmed?0.2:1;
+    const r=matched?7*S:5*S;
+    ctx.beginPath(); ctx.arc(nx,ny,r,0,Math.PI*2);
+    glow(cc,matched?24:10);
+    ctx.fillStyle=matched?'#fff':cc;
+    ctx.fill(); noGlow();
+    ctx.globalAlpha=1;
+
+    ctx.save();
+    const fs=matched?`bold ${11*S}px`:`${10*S}px`;
+    ctx.font=`${fs} 'Courier New',monospace`;
+    ctx.textBaseline='bottom';
+    const em=innerW*0.12;
+    let align='center', finalLx=lx;
+    if(nx-innerX<em){ align='left'; finalLx=nx+10; }
+    else if(innerX+innerW-nx<em){ align='right'; finalLx=nx-10; }
+    ctx.textAlign=align;
+    ctx.globalAlpha=dimmed?0.2:1;
+    glow(cc,matched?8:3);
+    ctx.fillStyle=matched?'#fff':hexToRgba(cc,0.9);
+    ctx.fillText(n.concept, finalLx, ly); noGlow();
+    ctx.globalAlpha=1;
+    ctx.restore();
+
+    layoutNodes.push({node:n, wx:nx, wy:ny});
+  });
+}
+
+// ── Coordinate helpers ────────────────────────────────────────────────────────
+// Convert screen clientY -> canvas-relative Y
+function canvasY(clientY) { return clientY - TOOLBAR_H(); }
+
+function worldPt(scx, scy) {
+  const W=canvas.width, H=canvas.height;
+  if (zoomedCat) {
+    // In zoom mode, no camera transform
+    return { x:scx, y:scy };
+  }
+  return {
+    x: (scx - W/2)/cam.z + W/2 - cam.x,
+    y: (scy - H/2)/cam.z + H/2 - cam.y,
+  };
+}
+
+// ── Events ────────────────────────────────────────────────────────────────────
+function onMove(e) {
+  mx = e.clientX;
+  my = canvasY(e.clientY); // canvas-relative Y
+
+  if(drag){
+    cam.x += (mx - drag.mx)/cam.z;
+    cam.y += (my - drag.my)/cam.z;
+    drag.mx=mx; drag.my=my;
+    return; // draw happens in RAF
+  }
+
+  // Quadrant hover tracking (world coords)
+  if (!zoomedCat) {
+    const w=worldPt(mx,my);
+    GROUPS.forEach(g=>{
+      if(!g.bounds) return;
+      const b=g.bounds;
+      const inside=w.x>=b.x&&w.x<=b.x+b.w&&w.y>=b.y&&w.y<=b.y+b.h;
+      const qh=quadHover[g.name];
+      const wasInside=qh.enteredAt>qh.exitedAt;
+      if(inside&&!wasInside) qh.enteredAt=Date.now();
+      else if(!inside&&wasInside) qh.exitedAt=Date.now();
+    });
+  }
+
+  // Tooltip / hover
+  const w=worldPt(mx,my);
+  let best=null, bestD=zoomedCat?20:14/cam.z;
+  layoutNodes.forEach(({node,wx,wy})=>{
+    const d=Math.hypot(wx-w.x,wy-w.y);
+    if(d<bestD){bestD=d;best=node;}
+  });
+  if(best){
+    canvas.style.cursor='pointer';
+    tip.style.display='block';
+    const px=e.clientX+16, py=e.clientY-10;
+    tip.style.left=Math.min(px,window.innerWidth-Math.min(360,window.innerWidth*0.9+20))+'px';
+    tip.style.top=Math.max(py,TOOLBAR_H()+4)+'px';
+    const catColor=CAT_COLORS[best.cat]||'#0ff';
+    const preview=best.desc?best.desc.slice(0,180)+(best.desc.length>180?'…':''):'';
+    tip.innerHTML=`<div class="title">${best.concept}</div>`
+                 +`<div class="cat" style="color:${catColor}">${best.cat}</div>`
+                 +(preview?`<div class="desc">${preview}</div>`:'')
+                 +(best.desc&&best.desc.length>180?`<div class="expand-hint">TAP TO READ MORE →</div>`:'');
+  } else {
+    canvas.style.cursor='crosshair'; tip.style.display='none';
+  }
+}
+
+function openCard(node) {
+  const catColor=CAT_COLORS[node.cat]||'#0ff';
+  document.getElementById('card-title').textContent=node.concept;
+  document.getElementById('card-cat').textContent=node.cat;
+  document.getElementById('card-cat').style.color=catColor;
+  document.getElementById('card-inner').style.borderColor=catColor;
+  document.getElementById('card-inner').style.boxShadow=`0 0 30px ${catColor}, inset 0 0 20px rgba(0,0,0,0.5)`;
+  document.getElementById('card-body').textContent=node.desc||'No description.';
+  document.getElementById('card-modal').classList.add('open');
+  tip.style.display='none';
+}
+
+function onClick(e) {
+  // First: if hovering a node, open its card
+  const w=worldPt(mx, canvasY(e.clientY));
+  let best=null, bestD=zoomedCat?20:14/cam.z;
+  layoutNodes.forEach(({node,wx,wy})=>{
+    const d=Math.hypot(wx-w.x,wy-w.y);
+    if(d<bestD){bestD=d;best=node;}
+  });
+  if(best){ openCard(best); return; }
+
+  // Otherwise: zoom into category tile (full view only)
+  if (zoomedCat) return;
+  for (const [catName, b] of Object.entries(catBounds)) {
+    if(w.x>=b.x&&w.x<=b.x+b.w&&w.y>=b.y&&w.y<=b.y+b.h){
+      if(activeCategories.has(catName)){
+        zoomIntoCategory(catName);
+        return;
+      }
+    }
+  }
+}
+
+document.getElementById('card-close').addEventListener('click',()=>{
+  document.getElementById('card-modal').classList.remove('open');
+});
+document.getElementById('card-modal').addEventListener('click',e=>{
+  if(e.target===document.getElementById('card-modal'))
+    document.getElementById('card-modal').classList.remove('open');
+});
+
+function zoomIntoCategory(name) {
+  zoomedCat=name;
+  layoutNodes=[];
+  tip.style.display='none';
+  document.getElementById('back-btn').classList.add('visible');
+  draw();
+}
+
+function zoomOut() {
+  zoomedCat=null;
+  layoutNodes=[];
+  document.getElementById('back-btn').classList.remove('visible');
+  draw();
+}
+
+canvas.addEventListener('mousedown', e=>{ drag={mx:e.clientX, my:canvasY(e.clientY)}; });
+canvas.addEventListener('mouseup',   ()=>drag=null);
+canvas.addEventListener('mouseleave',()=>{ drag=null; tip.style.display='none'; });
+canvas.addEventListener('mousemove', onMove);
+canvas.addEventListener('click',     onClick);
+
+canvas.addEventListener('wheel',e=>{
+  e.preventDefault();
+  if (zoomedCat) return;
+  const f=e.deltaY<0?1.12:0.9;
+  const W=canvas.width,H=canvas.height;
+  const cmy=canvasY(e.clientY);
+  const wx=(mx-W/2)/cam.z+W/2-cam.x;
+  const wy=(cmy-H/2)/cam.z+H/2-cam.y;
+  cam.z=Math.max(0.25,Math.min(10,cam.z*f));
+  cam.x=W/2-wx-(mx-W/2)/cam.z;
+  cam.y=H/2-wy-(cmy-H/2)/cam.z;
+},{passive:false});
+
+document.getElementById('back-btn').addEventListener('click', zoomOut);
+
+// ── Search ────────────────────────────────────────────────────────────────────
+const searchInput=document.getElementById('search-input');
+searchInput.addEventListener('input',e=>{ searchQuery=e.target.value; });
+document.getElementById('clear-search').addEventListener('click',()=>{
+  searchInput.value=''; searchQuery='';
+  document.getElementById('search-count').textContent='';
+});
+
+// ── Filter modal ──────────────────────────────────────────────────────────────
+function buildFilterModal(){
+  const body=document.getElementById('filter-body');
+  body.innerHTML='';
+  GROUPS.forEach(g=>{
+    const div=document.createElement('div');
+    div.className='filter-group';
+    div.innerHTML=`<div class="filter-group-title" style="color:${g.color}">${g.name} ${g.kanji}</div><div class="filter-chips"></div>`;
+    const chips=div.querySelector('.filter-chips');
+    g.catObjects.filter(c=>c.nodes&&c.nodes.length>0).forEach(cat=>{
+      const cc=CAT_COLORS[cat.name]||'#888';
+      const chip=document.createElement('div');
+      chip.className='chip'+(activeCategories.has(cat.name)?' active':'');
+      chip.style.borderColor=cc; chip.style.color=cc;
+      chip.innerHTML=`<span class="chip-dot" style="background:${cc}"></span>${cat.name} <span style="opacity:0.5">[${cat.nodes.length}]</span>`;
+      chip.dataset.cat=cat.name;
+      chip.addEventListener('click',()=>{ chip.classList.toggle('active'); updateFilterCount(); });
+      chips.appendChild(chip);
+    });
+    body.appendChild(div);
+  });
+  updateFilterCount();
+}
+
+function updateFilterCount(){
+  const chips=document.querySelectorAll('.chip.active');
+  const cats=new Set([...chips].map(c=>c.dataset.cat));
+  const vis=RAW.filter(n=>cats.has(n.cat)).length;
+  document.getElementById('visible-count').textContent=`${vis} concepts visible`;
+  document.getElementById('filter-count').textContent=cats.size===Object.keys(CAT_COLORS).length?'ALL':cats.size;
+}
+
+document.getElementById('filter-btn').addEventListener('click',()=>{
+  buildFilterModal();
+  document.getElementById('filter-modal').classList.add('open');
+});
+document.getElementById('close-filter').addEventListener('click',()=>{ document.getElementById('filter-modal').classList.remove('open'); });
+document.getElementById('filter-modal').addEventListener('click',e=>{ if(e.target===document.getElementById('filter-modal')) document.getElementById('filter-modal').classList.remove('open'); });
+document.getElementById('select-all').addEventListener('click',()=>{ document.querySelectorAll('.chip').forEach(c=>c.classList.add('active')); updateFilterCount(); });
+document.getElementById('select-none').addEventListener('click',()=>{ document.querySelectorAll('.chip').forEach(c=>c.classList.remove('active')); updateFilterCount(); });
+document.getElementById('apply-btn').addEventListener('click',()=>{
+  const chips=document.querySelectorAll('.chip.active');
+  activeCategories=new Set([...chips].map(c=>c.dataset.cat));
+  document.getElementById('filter-modal').classList.remove('open');
+});
+
+// ── RAF loop ──────────────────────────────────────────────────────────────────
+function loop(){
+  draw();
+  requestAnimationFrame(loop);
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+function resize(){
+  canvas.width=window.innerWidth;
+  canvas.height=window.innerHeight-TOOLBAR_H()-HUD_H;
+}
+window.addEventListener('resize',()=>{ resize(); });
+resize();
+loop();
+</script>
+</body>
+</html>
