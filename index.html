@@ -152,7 +152,103 @@
   .ts-btn.active { background:rgba(0,255,255,0.15); color:#0ff; }
   .ts-btn:hover { color:#0ff; }
 
-  /* Render mode toggle */
+  /* ── List View ──────────────────────────────────────────────────────────── */
+  #list-view {
+    display:none;
+    position:fixed;
+    top:0; left:0; right:0; bottom:28px; /* above HUD */
+    overflow-y:auto;
+    padding:0 0 16px 0;
+    background:#000508;
+    font-family:'Courier New',monospace;
+    -webkit-overflow-scrolling:touch;
+  }
+  #list-view::-webkit-scrollbar { width:4px; }
+  #list-view::-webkit-scrollbar-track { background:transparent; }
+  #list-view::-webkit-scrollbar-thumb { background:rgba(0,255,255,0.2); border-radius:2px; }
+
+  .lv-group {
+    border-bottom:1px solid rgba(255,255,255,0.05);
+    padding-bottom:8px; margin-bottom:4px;
+  }
+  .lv-group-header {
+    display:flex; align-items:baseline; gap:10px;
+    padding:10px 16px 6px;
+    letter-spacing:3px; font-size:clamp(10px,1.8vw,12px);
+    position:sticky; top:0;
+    background:#000508;
+    border-bottom:1px solid rgba(255,255,255,0.06);
+    z-index:2;
+  }
+  .lv-group-name { font-weight:bold; }
+  .lv-group-kanji { opacity:0.5; font-size:0.9em; }
+  .lv-group-count { opacity:0.35; font-size:0.8em; margin-left:auto; letter-spacing:1px; }
+
+  .lv-category {
+    padding:4px 0;
+  }
+  .lv-cat-header {
+    display:flex; align-items:baseline; gap:8px;
+    padding:6px 20px 3px;
+    font-size:clamp(9px,1.6vw,11px); letter-spacing:2px; opacity:0.7;
+  }
+  .lv-cat-count { opacity:0.5; font-size:0.85em; }
+
+  .lv-node {
+    display:flex; align-items:baseline; gap:0;
+    padding:4px 28px 4px 32px;
+    cursor:pointer;
+    font-size:clamp(12px,2vw,14px);
+    letter-spacing:0.5px;
+    border-left:2px solid transparent;
+    transition:background 0.1s, border-color 0.1s;
+    line-height:1.5;
+  }
+  .lv-node:hover {
+    background:rgba(255,255,255,0.05);
+  }
+  .lv-node .lv-bullet {
+    flex-shrink:0; margin-right:8px; opacity:0.5; font-size:0.85em;
+  }
+  .lv-node .lv-concept { flex:1; }
+  .lv-node .lv-desc-hint {
+    font-size:clamp(9px,1.4vw,10px); opacity:0.3; margin-left:10px;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+    max-width:40%; flex-shrink:1;
+  }
+  .lv-node.lv-matched {
+    background:rgba(255,255,255,0.07);
+  }
+  .lv-node.lv-matched .lv-concept { font-weight:bold; }
+  .lv-node.lv-dimmed { opacity:0.2; }
+  .lv-node mark {
+    background:transparent; font-weight:bold;
+  }
+  .lv-no-results {
+    padding:40px 20px; text-align:center;
+    color:rgba(0,255,255,0.3); font-size:13px; letter-spacing:2px;
+  }
+
+  /* View toggle */
+  #view-toggle {
+    display:flex; gap:0; border:1px solid rgba(0,255,255,0.3); border-radius:2px; overflow:hidden; flex-shrink:0;
+  }
+  .vt-btn {
+    background:transparent; border:none; color:rgba(0,255,255,0.4);
+    font-family:'Courier New',monospace; font-size:10px; padding:2px 8px;
+    cursor:pointer; transition:all 0.15s; line-height:1.2; letter-spacing:1px;
+  }
+  .vt-btn.active { background:rgba(0,255,255,0.15); color:#0ff; }
+  .vt-btn:hover { color:#0ff; }
+
+  @media (max-width:600px) {
+    .lv-node { padding:6px 12px 6px 20px; font-size:14px; }
+    .lv-node .lv-desc-hint { display:none; }
+    .lv-group-header { padding:10px 12px 6px; }
+    .lv-cat-header { padding:6px 14px 3px; }
+  }
+
+
   #render-toggle {
     display:flex; gap:0; border:1px solid rgba(0,255,255,0.3); border-radius:2px; overflow:hidden; flex-shrink:0;
   }
@@ -272,6 +368,10 @@
     <button class="ts-btn active" data-size="medium">中</button>
     <button class="ts-btn" data-size="large">大</button>
   </div>
+  <div id="view-toggle">
+    <button class="vt-btn active" id="vt-map">MAP</button>
+    <button class="vt-btn" id="vt-list">LIST</button>
+  </div>
   <div id="render-toggle">
     <button class="rt-btn active" id="rt-flat">FLAT</button>
     <button class="rt-btn" id="rt-neon">NEON</button>
@@ -280,6 +380,7 @@
 
 <button id="back-btn">← BACK</button>
 <canvas id="c"></canvas>
+<div id="list-view"></div>
 <div id="tooltip"></div>
 
 <div id="filter-modal">
@@ -320,7 +421,7 @@
   <span class="sep">|</span>
   <span><div class="dot" style="background:#ff0;box-shadow:0 0 4px #ff0"></div> CONCEPT</span>
   <span class="sep">|</span>
-  <span>DRAG PAN · SCROLL ZOOM · HOVER NODE · CLICK CATEGORY v9</span>
+  <span>DRAG PAN · SCROLL ZOOM · HOVER NODE · CLICK CATEGORYv9b</span>
 </div>
 
 <script>
@@ -1125,9 +1226,134 @@ function applyRenderMode() {
 document.getElementById('rt-flat').addEventListener('click', () => { FANCY = false; applyRenderMode(); });
 document.getElementById('rt-neon').addEventListener('click', () => { FANCY = true;  applyRenderMode(); });
 
+// ── View Toggle (MAP / LIST) ──────────────────────────────────────────────────
+let VIEW = localStorage.getItem('bjj-view') || 'map'; // 'map' | 'list'
+const listEl = document.getElementById('list-view');
+
+function highlight(text, q) {
+  if (!q) return text;
+  const idx = text.toLowerCase().indexOf(q.toLowerCase());
+  if (idx === -1) return text;
+  return text.slice(0, idx)
+    + `<mark style="color:inherit">${text.slice(idx, idx + q.length)}</mark>`
+    + text.slice(idx + q.length);
+}
+
+function renderListView() {
+  const q = searchQuery.toLowerCase();
+  let html = '';
+  let totalVisible = 0;
+
+  GROUPS.forEach(g => {
+    const activeCats = (g.catObjects || []).filter(c =>
+      c.nodes && c.nodes.length > 0 && activeCategories.has(c.name)
+    );
+    if (!activeCats.length) return;
+
+    // Count visible nodes in this group
+    let groupCount = 0;
+    let catsHtml = '';
+
+    activeCats.forEach(cat => {
+      const cc = CAT_COLORS[cat.name] || '#888';
+      let nodes = cat.nodes;
+
+      // Apply search filter
+      const matched = q ? nodes.filter(n =>
+        n.concept.toLowerCase().includes(q) ||
+        n.cat.toLowerCase().includes(q) ||
+        n.desc.toLowerCase().includes(q)
+      ) : null;
+
+      let nodesHtml = '';
+      nodes.forEach(n => {
+        const isMatched  = q ? (n.concept.toLowerCase().includes(q) || n.desc.toLowerCase().includes(q)) : false;
+        const isDimmed   = q ? !isMatched : false;
+        const cls        = isDimmed ? 'lv-node lv-dimmed' : isMatched ? 'lv-node lv-matched' : 'lv-node';
+        const concept    = isMatched ? highlight(n.concept, q) : n.concept;
+        const descHint   = n.desc ? n.desc.slice(0, 60).replace(/</g,'&lt;') + (n.desc.length > 60 ? '…' : '') : '';
+
+        nodesHtml += `<div class="${cls}" style="border-left-color:${isMatched ? cc : 'transparent'}"
+          data-id="${n.id}">
+          <span class="lv-bullet" style="color:${cc}">−</span>
+          <span class="lv-concept" style="color:${cc}">${concept}</span>
+          ${descHint && !isDimmed ? `<span class="lv-desc-hint">${descHint}</span>` : ''}
+        </div>`;
+      });
+
+      const visCount = q ? (matched ? matched.length : 0) : nodes.length;
+      groupCount += visCount;
+      if (q && visCount === 0) return; // hide empty categories when searching
+
+      catsHtml += `<div class="lv-category">
+        <div class="lv-cat-header">
+          <span style="color:${cc}">${cat.name}</span>
+          <span class="lv-cat-count" style="color:${cc}">[${visCount}]</span>
+        </div>
+        ${nodesHtml}
+      </div>`;
+    });
+
+    if (!catsHtml) return;
+    totalVisible += groupCount;
+
+    html += `<div class="lv-group">
+      <div class="lv-group-header" style="color:${g.color}">
+        <span class="lv-group-name">${g.name}</span>
+        <span class="lv-group-kanji">${g.kanji}</span>
+        <span class="lv-group-count">[${groupCount}]</span>
+      </div>
+      ${catsHtml}
+    </div>`;
+  });
+
+  if (!html) {
+    html = `<div class="lv-no-results">NO CONCEPTS MATCH — TRY A DIFFERENT SEARCH OR FILTER</div>`;
+  }
+
+  listEl.innerHTML = html;
+
+  // Wire up clicks → openCard (same modal as map view)
+  listEl.querySelectorAll('.lv-node').forEach(el => {
+    el.addEventListener('click', () => {
+      const node = RAW.find(n => n.id === el.dataset.id);
+      if (node) openCard(node);
+    });
+  });
+}
+
+function setView(v) {
+  VIEW = v;
+  localStorage.setItem('bjj-view', v);
+  const isMap = v === 'map';
+
+  canvas.style.display    = isMap ? 'block' : 'none';
+  listEl.style.display    = isMap ? 'none'  : 'block';
+  document.getElementById('back-btn').style.display = isMap ? '' : 'none';
+
+  document.getElementById('vt-map').classList.toggle('active',  isMap);
+  document.getElementById('vt-list').classList.toggle('active', !isMap);
+
+  if (!isMap) {
+    // Position list below toolbar
+    const tbH = TOOLBAR_H();
+    listEl.style.top = tbH + 'px';
+    renderListView();
+  } else {
+    markDirty();
+  }
+}
+
+document.getElementById('vt-map').addEventListener('click',  () => setView('map'));
+document.getElementById('vt-list').addEventListener('click', () => setView('list'));
+
 // ── Search ────────────────────────────────────────────────────────────────────
 const searchInput=document.getElementById('search-input');
-searchInput.addEventListener('input',e=>{ searchQuery=e.target.value; markDirty(); });
+searchInput.addEventListener('input',e=>{
+  searchQuery=e.target.value;
+  if (VIEW === 'list') renderListView();
+  else markDirty();
+});
 document.getElementById('clear-search').addEventListener('click',()=>{
   searchInput.value=''; searchQuery='';
   document.getElementById('search-count').textContent='';
@@ -1177,7 +1403,8 @@ document.getElementById('apply-btn').addEventListener('click',()=>{
   const chips=document.querySelectorAll('.chip.active');
   activeCategories=new Set([...chips].map(c=>c.dataset.cat));
   document.getElementById('filter-modal').classList.remove('open');
-  markDirty();
+  if (VIEW === 'list') renderListView();
+  else markDirty();
 });
 
 // ── RAF loop — dirty flag, only redraw when needed ───────────────────────────
@@ -1236,6 +1463,8 @@ resize();
 // Sync render toggle button state (FANCY may be true from localStorage)
 document.getElementById('rt-flat').classList.toggle('active', !FANCY);
 document.getElementById('rt-neon').classList.toggle('active',  FANCY);
+// Sync view toggle and render list if needed
+setView(VIEW);
 loop();
 </script>
 </body>
