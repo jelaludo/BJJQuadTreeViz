@@ -140,6 +140,14 @@
   #back-btn:hover { box-shadow:0 0 10px rgba(0,255,255,0.4); border-color:#0ff; }
   #back-btn.visible { display:block; }
 
+  #reset-cam-btn {
+    background:transparent; border:1px solid rgba(0,255,255,0.25);
+    color:rgba(0,255,255,0.5); font-family:'Courier New',monospace;
+    font-size:16px; padding:3px 8px; cursor:pointer; border-radius:3px;
+    transition:all 0.15s; line-height:1;
+  }
+  #reset-cam-btn:hover { color:#0ff; border-color:#0ff; box-shadow:0 0 8px rgba(0,255,255,0.3); }
+
   /* Text size toggle */
   #text-size-toggle {
     display:flex; gap:0; border:1px solid rgba(0,255,255,0.3); border-radius:2px; overflow:hidden; flex-shrink:0;
@@ -224,7 +232,13 @@
   .lv-node mark {
     background:transparent; font-weight:bold;
   }
-  .lv-no-results {
+  .lv-axis-hint {
+    opacity:0.35; font-size:0.9em; cursor:help; margin-left:4px;
+    transition:opacity 0.15s;
+  }
+  .lv-axis-hint:hover { opacity:0.9; }
+
+
     padding:40px 20px; text-align:center;
     color:rgba(0,255,255,0.3); font-size:13px; letter-spacing:2px;
   }
@@ -376,6 +390,7 @@
     <button class="rt-btn active" id="rt-flat">FLAT</button>
     <button class="rt-btn" id="rt-neon">NEON</button>
   </div>
+  <button id="reset-cam-btn" title="Reset view (fit map to screen)">⊡</button>
 </div>
 
 <button id="back-btn">← BACK</button>
@@ -421,7 +436,7 @@
   <span class="sep">|</span>
   <span><div class="dot" style="background:#ff0;box-shadow:0 0 4px #ff0"></div> CONCEPT</span>
   <span class="sep">|</span>
-  <span>DRAG PAN · SCROLL ZOOM · HOVER NODE · CLICK CATEGORYv9b</span>
+  <span>DRAG PAN · SCROLL ZOOM · HOVER NODE · CLICK CATEGORYv10</span>
 </div>
 
 <script>
@@ -450,6 +465,33 @@ const CAT_COLORS = {
   'White Belt Tips':        '#ffff88',
   'Noteworthy Grapplers':   '#ff22aa',
   'Test Category':          '#444444',
+};
+
+// Per-category axis labels — x goes left→right, y goes bottom→top
+const CAT_AXES = {
+  'Grappling Primitives':    { xl:'Opponent', xr:'Self',           yb:'Physical',              yt:'Mental'              },
+  'Tactics':                 { xl:'Opponent', xr:'Self',           yb:'Physical',              yt:'Mental'              },
+  'Strategy':                { xl:'Opponent', xr:'Self',           yb:'Physical',              yt:'Mental'              },
+  'Training':                { xl:'Opponent', xr:'Self',           yb:'Physical',              yt:'Mental'              },
+  'Coaching':                { xl:'Opponent', xr:'Self',           yb:'Physical',              yt:'Mental'              },
+  '21 Immutable Principles': { xl:'Opponent', xr:'Self',           yb:'Physical',              yt:'Mental'              },
+  '32 Principles':           { xl:'Opponent', xr:'Self',           yb:'Physical',              yt:'Mental'              },
+  'White Belt Tips':         { xl:'Opponent', xr:'Self',           yb:'Physical',              yt:'Mental'              },
+  'Internal':                { xl:'Opponent', xr:'Self',           yb:'Physical',              yt:'Mental'              },
+  'Competition':             { xl:'Opponent', xr:'Self',           yb:'Physical',              yt:'Mental'              },
+  'Memes':                   { xl:'Self-deprecation', xr:'r/iamabadass', yb:'Total BS',        yt:'Grain of Truth'      },
+  'Black Belt Wisdom':       { xl:'Funny',    xr:'Semi-Serious',   yb:'Self-aggrandizing',     yt:'Self-deprecating'    },
+  'Player Types':            { xl:'Unskilled', xr:'Skilled',       yb:'Aggro',                 yt:'Chill'               },
+  'Resources':               { xl:'Free',     xr:'Expensive',      yb:'Short-Form',            yt:'Long-Form'           },
+  'Noteworthy Grapplers':    { xl:'Gi',       xr:'No-Gi',          yb:'Modern',                yt:'Old-School'          },
+  'Anatomy Awareness':       { xl:'Bones',    xr:'Muscles',        yb:'Internal',              yt:'External'            },
+  "Do's & Don'ts":           { xl:'Trivial',  xr:'Serious',        yb:"Don't",                 yt:'Do'                  },
+  'Dojos/Clubs Types':       { xl:'Low Intensity', xr:'High Intensity', yb:'Pure Love of Art', yt:'Pure Bu$$ine$$'      },
+  'Physics of Grappling':    { xl:'Linear',   xr:'Rotational',     yb:'Force',                 yt:'Motion'              },
+  "Why Do We Train?":        { xl:'Others',   xr:'Self',           yb:'Extrinsic',             yt:'Intrinsic'           },
+  'Learning Methods':        { xl:'Coach-Led', xr:'Self-Directed', yb:'Structured',            yt:'Open / Exploratory'  },
+  'Techniques':              { xl:'Low %',    xr:'High %',         yb:'Complex',               yt:'Straightforward'     },
+  'Test Category':           { xl:'Left',     xr:'Right',          yb:'Bottom',                yt:'Top'                 },
 };
 
 const GROUPS = [
@@ -484,6 +526,45 @@ const tip    = document.getElementById('tooltip');
 
 let cam  = { x:0, y:0, z:1 };
 let drag = null;
+
+const CAM_Z_MIN = 0.4;   // how far out you can zoom (map fills ~40% of screen)
+const CAM_Z_MAX = 10;
+const CAM_MARGIN = 0.25; // fraction of W/H that must stay on-screen
+
+// After any cam change, call this to prevent the map escaping the viewport.
+// Ensures at least CAM_MARGIN of the map's width/height stays visible.
+function clampCam() {
+  const W = canvas.width / DPR;
+  const H = canvas.height / DPR;
+  const mw = 0.5 + CAM_MARGIN / cam.z;
+  const mh = 0.5 + CAM_MARGIN / cam.z;
+  cam.x = Math.max(-W * mw, Math.min(W * mw, cam.x));
+  cam.y = Math.max(-H * mh, Math.min(H * mh, cam.y));
+}
+
+// Zoom toward screen point (sx, sy) by factor f.
+// Correct anchor: the world point under (sx,sy) stays fixed after zoom.
+function zoomAt(sx, sy, f) {
+  if (zoomedCat) return;
+  const W = canvas.width / DPR;
+  const H = canvas.height / DPR;
+  // World point currently under (sx, sy)
+  const wx = (sx - W/2) / cam.z + W/2 - cam.x;
+  const wy = (sy - H/2) / cam.z + H/2 - cam.y;
+  // Apply zoom
+  cam.z = Math.max(CAM_Z_MIN, Math.min(CAM_Z_MAX, cam.z * f));
+  // Re-anchor: (wx,wy) must still map to (sx,sy)
+  // sx = (wx + cam.x - W/2)*z + W/2  →  cam.x = (sx-W/2)/z - wx + W/2
+  cam.x = (sx - W/2) / cam.z + W/2 - wx;
+  cam.y = (sy - H/2) / cam.z + H/2 - wy;
+  clampCam();
+}
+
+// Snap camera back to default (full map visible, centered)
+function resetCam() {
+  cam.x = 0; cam.y = 0; cam.z = 1;
+  markDirty();
+}
 let mx=0, my=0; // canvas-relative mouse
 let searchQuery = '';
 let activeCategories = new Set(Object.keys(CAT_COLORS));
@@ -743,6 +824,12 @@ function drawFull(W, H, now) {
           ctx.fillStyle=hexToRgba(cc,0.4);
           ctx.fillText(`[${cat.nodes.length}]`, cb.x+cb.w/2, cb.y+19);
         }
+
+        // Axis labels — only when tile is large enough to show them legibly
+        if(cb.w > 70 && cb.h > 50){
+          drawAxisLabels(cb.x, cb.y, cb.w, cb.h, CAT_AXES[cat.name], cc, FANCY ? 0.22 : 0.28, 5.5);
+        }
+
         ctx.restore();
       }
 
@@ -817,6 +904,47 @@ function drawFull(W, H, now) {
 }
 
 // ── Zoomed category view ──────────────────────────────────────────────────────
+// ── Axis Label Renderer ───────────────────────────────────────────────────────
+// Draws the 4 edge labels (xl, xr, yb, yt) for a given bounding box.
+// fontSize in CSS px (pre-DPR), alpha controls opacity.
+function drawAxisLabels(bx, by, bw, bh, axes, color, alpha, fontSize) {
+  if (!axes) return;
+  const S = fScale();
+  const fs = fontSize * S;
+  ctx.save();
+  ctx.font = `${fs}px 'Courier New',monospace`;
+  ctx.fillStyle = hexToRgba(color, alpha);
+  ctx.globalAlpha = 1;
+
+  const pad = 3 * S;
+
+  // X left — "← label" at left-center
+  ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+  ctx.fillText(`← ${axes.xl}`, bx + pad, by + bh / 2);
+
+  // X right — "label →" at right-center
+  ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+  ctx.fillText(`${axes.xr} →`, bx + bw - pad, by + bh / 2);
+
+  // Y top — rotated, placed at top-center
+  ctx.save();
+  ctx.translate(bx + bw / 2, by + pad);
+  ctx.rotate(-Math.PI / 2);
+  ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+  ctx.fillText(`↑ ${axes.yt}`, 0, 0);
+  ctx.restore();
+
+  // Y bottom — rotated, placed at bottom-center
+  ctx.save();
+  ctx.translate(bx + bw / 2, by + bh - pad);
+  ctx.rotate(-Math.PI / 2);
+  ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+  ctx.fillText(`${axes.yb} ↓`, 0, 0);
+  ctx.restore();
+
+  ctx.restore();
+}
+
 function drawZoomed(W, H, now) {
   const S = fScale();
   const PAD=40;
@@ -844,6 +972,9 @@ function drawZoomed(W, H, now) {
   ctx.strokeStyle=hexToRgba(cc,0.07); ctx.lineWidth=1;
   for(let gx=innerX;gx<=innerX+innerW;gx+=innerW/8){ ctx.beginPath();ctx.moveTo(gx,innerY);ctx.lineTo(gx,innerY+innerH);ctx.stroke(); }
   for(let gy=innerY;gy<=innerY+innerH;gy+=innerH/8){ ctx.beginPath();ctx.moveTo(innerX,gy);ctx.lineTo(innerX+innerW,gy);ctx.stroke(); }
+
+  // Axis labels
+  drawAxisLabels(innerX, innerY, innerW, innerH, CAT_AXES[zoomedCat], cc, 0.45, 9);
 
   const q=searchQuery.toLowerCase();
   const LH = 12*S; // label height for collision
@@ -927,6 +1058,7 @@ function onMove(e) {
     cam.x += (mx - drag.mx)/cam.z;
     cam.y += (my - drag.my)/cam.z;
     drag.mx=mx; drag.my=my;
+    clampCam();
     markDirty(); return;
   }
 
@@ -1041,21 +1173,15 @@ canvas.addEventListener('mouseleave',()=>{ drag=null; tip.style.display='none'; 
 canvas.addEventListener('mousemove', onMove);
 canvas.addEventListener('click',     onClick);
 
-canvas.addEventListener('wheel',e=>{
+canvas.addEventListener('wheel', e => {
   e.preventDefault();
-  if (zoomedCat) return;
-  const f=e.deltaY<0?1.12:0.9;
-  const W=canvas.width/DPR, H=canvas.height/DPR;
-  const cmy=canvasY(e.clientY);
-  const wx=(mx-W/2)/cam.z+W/2-cam.x;
-  const wy=(cmy-H/2)/cam.z+H/2-cam.y;
-  cam.z=Math.max(0.25,Math.min(10,cam.z*f));
-  cam.x=W/2-wx-(mx-W/2)/cam.z;
-  cam.y=H/2-wy-(cmy-H/2)/cam.z;
+  const f = e.deltaY < 0 ? 1.12 : 0.9;
+  zoomAt(e.clientX, canvasY(e.clientY), f);
   markDirty();
-},{passive:false});
+}, { passive: false });
 
 document.getElementById('back-btn').addEventListener('click', zoomOut);
+document.getElementById('reset-cam-btn').addEventListener('click', () => { if (!zoomedCat) resetCam(); });
 
 // ── Touch events ──────────────────────────────────────────────────────────────
 let touchState = { type: null, lastX: 0, lastY: 0, pinchDist: 0, tapTimeout: null };
@@ -1114,6 +1240,7 @@ canvas.addEventListener('touchmove', e => {
     if (!zoomedCat) {
       cam.x += (cx - touchState.lastX) / cam.z;
       cam.y += (cy - touchState.lastY) / cam.z;
+      clampCam();
     }
     mx = cx; my = cy;
     touchState.lastX = cx;
@@ -1130,24 +1257,13 @@ canvas.addEventListener('touchmove', e => {
     const cx = midClientX;
     const cy = canvasY(midClientY);
 
-    const W = canvas.width / DPR;
-    const H = canvas.height / DPR;
-
-    // Current world point under the pinch midpoint
-    const wx = (cx - W/2) / cam.z + W/2 - cam.x;
-    const wy = (cy - H/2) / cam.z + H/2 - cam.y;
-
-    // Scale
     const f = newDist / touchState.pinchDist;
-    cam.z = Math.max(0.25, Math.min(10, cam.z * f));
-
-    // Keep world point under midpoint stationary
-    cam.x = W/2 - wx - (cx - W/2) / cam.z;
-    cam.y = H/2 - wy - (cy - H/2) / cam.z;
+    zoomAt(cx, cy, f);
 
     // Also pan by midpoint delta
     cam.x += (cx - touchState.lastX) / cam.z;
     cam.y += (cy - touchState.lastY) / cam.z;
+    clampCam();
 
     touchState.pinchDist = newDist;
     touchState.lastX = cx;
@@ -1285,9 +1401,13 @@ function renderListView() {
       groupCount += visCount;
       if (q && visCount === 0) return; // hide empty categories when searching
 
+      const ax = CAT_AXES[cat.name];
+      const axisHint = ax ? `<span class="lv-axis-hint" title="${ax.xl} → ${ax.xr} | ${ax.yb} ↑ ${ax.yt}">⊹</span>` : '';
+
       catsHtml += `<div class="lv-category">
         <div class="lv-cat-header">
           <span style="color:${cc}">${cat.name}</span>
+          ${axisHint}
           <span class="lv-cat-count" style="color:${cc}">[${visCount}]</span>
         </div>
         ${nodesHtml}
